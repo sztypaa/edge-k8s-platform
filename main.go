@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"time"
 
@@ -40,10 +41,21 @@ func main() {
 	mqttBroker := getEnv("MQTT_BROKER", "tcp://localhost:1883")
 	mqttTopic := fmt.Sprintf("k8s/%s/control-plane/events", clusterID)
 
-	log.Printf("[INFO] Start agenta Control Plane dla: %s", clusterID)
-	log.Printf("[INFO] Broker MQTT: %s | Topic: %s", mqttBroker, mqttTopic)
+	log.Printf("[INFO] Starting Control Plane agent for: %s", clusterID)
+	log.Printf("[INFO] MQTT Broker: %s | Topic: %s", mqttBroker, mqttTopic)
 
-	opts := mqtt.NewClientOptions().AddBroker(mqttBroker)
+	opts := mqtt.NewClientOptions()
+
+	brokerURL, err := url.Parse(mqttBroker)
+	if err == nil && brokerURL.User != nil {
+		opts.AddBroker(fmt.Sprintf("%s://%s", brokerURL.Scheme, brokerURL.Host))
+		opts.SetUsername(brokerURL.User.Username())
+		password, _ := brokerURL.User.Password()
+		opts.SetPassword(password)
+	} else {
+		opts.AddBroker(mqttBroker)
+	}
+
 	opts.SetClientID(fmt.Sprintf("cp-agent-%s", clusterID))
 	opts.SetAutoReconnect(true)
 	opts.SetKeepAlive(60 * time.Second)
@@ -52,7 +64,7 @@ func main() {
 	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
 		log.Fatalf("[FATAL] MQTT connect error: %v", token.Error())
 	}
-	log.Println("[INFO] Połączono z brokerem MQTT!")
+	log.Println("[INFO] Connected to MQTT broker successfully")
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -71,7 +83,7 @@ func main() {
 	for {
 		watcher, err := clientset.CoreV1().Events("").Watch(context.Background(), metav1.ListOptions{})
 		if err != nil {
-			log.Printf("[ERROR] Watcher error: %v, ponawiam za 5s...", err)
+			log.Printf("[ERROR] Watcher error: %v, retrying in 5s...", err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -107,6 +119,6 @@ func main() {
 
 			log.Printf("[SENT MQTT] [%s] %s: %s", payload.Type, payload.Object, payload.Message)
 		}
-		log.Println("[WARN] Watcher przerwany, wznawianie...")
+		log.Println("[WARN] Watcher interrupted, resuming...")
 	}
 }
