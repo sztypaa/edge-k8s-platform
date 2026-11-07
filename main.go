@@ -36,10 +36,10 @@ type BidPayload struct {
 }
 
 type TaskResult struct {
-	TaskID      string `json:"task_id"`
-	ClusterID   string `json:"cluster_id"`
-	Status      string `json:"status"`
-	DurationMs  int64  `json:"duration_ms"`
+	TaskID     string `json:"task_id"`
+	ClusterID  string `json:"cluster_id"`
+	Status     string `json:"status"`
+	DurationMs int64  `json:"duration_ms"`
 }
 
 type NodeMetricsList struct {
@@ -164,21 +164,6 @@ func main() {
 	clusterID := getEnv("CLUSTER_ID", "rpi-1")
 	mqttBroker := getEnv("MQTT_BROKER", "tcp://localhost:1883")
 
-	opts := mqtt.NewClientOptions()
-	brokerURL, err := url.Parse(mqttBroker)
-	if err == nil && brokerURL.User != nil {
-		opts.AddBroker(fmt.Sprintf("%s://%s", brokerURL.Scheme, brokerURL.Host))
-		opts.SetUsername(brokerURL.User.Username())
-		password, _ := brokerURL.User.Password()
-		opts.SetPassword(password)
-	} else {
-		opts.AddBroker(mqttBroker)
-	}
-
-	opts.SetClientID(fmt.Sprintf("cp-agent-%s", clusterID))
-	opts.SetAutoReconnect(true)
-	opts.SetKeepAlive(60 * time.Second)
-
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		kubeconfig := getEnv("KUBECONFIG", os.Getenv("HOME")+"/.kube/config")
@@ -193,16 +178,10 @@ func main() {
 		log.Fatalf("[FATAL] K8s client error: %v", err)
 	}
 
-	mqttClient := mqtt.NewClient(opts)
-	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
-		log.Fatalf("[FATAL] MQTT connect error: %v", token.Error())
-	}
-	log.Printf("[INFO] Agent %s connected to MQTT broker", clusterID)
-
 	cfpTopic := "clusterless/auction/cfp"
 	execTopic := fmt.Sprintf("clusterless/execute/%s", clusterID)
 
-	mqttClient.Subscribe(cfpTopic, 1, func(client mqtt.Client, msg mqtt.Message) {
+	handleCFP := func(client mqtt.Client, msg mqtt.Message) {
 		var cfp TaskCFP
 		if err := json.Unmarshal(msg.Payload(), &cfp); err != nil {
 			log.Printf("[ERROR] Invalid CFP payload: %v", err)
@@ -240,9 +219,9 @@ func main() {
 		data, _ := json.Marshal(bid)
 		client.Publish("clusterless/auction/bids", 1, false, data)
 		log.Printf("[BID SENT] Task: %s | AvailCPU: %dm | AvailMem: %dMiB | Cached: %v | Score: %d", cfp.TaskID, availCPU, availMem, cached, score)
-	})
+	}
 
-	mqttClient.Subscribe(execTopic, 1, func(client mqtt.Client, msg mqtt.Message) {
+	handleExecute := func(client mqtt.Client, msg mqtt.Message) {
 		var task TaskCFP
 		if err := json.Unmarshal(msg.Payload(), &task); err != nil {
 			log.Printf("[ERROR] Invalid execute payload: %v", err)
@@ -267,7 +246,48 @@ func main() {
 			client.Publish("clusterless/results", 1, false, data)
 			log.Printf("[COMPLETED] Task %s finished with status %s in %dms", t.TaskID, status, duration)
 		}(task)
+	}
+
+	opts := mqtt.NewClientOptions()
+	brokerURL, err := url.Parse(mqttBroker)
+	if err == nil && brokerURL.User != nil {
+		opts.AddBroker(fmt.Sprintf("%s://%s", brokerURL.Scheme, brokerURL.Host))
+		opts.SetUsername(brokerURL.User.Username())
+		password, _ := brokerURL.User.Password()
+		opts.SetPassword(password)
+	} else {
+		opts.AddBroker(mqttBroker)
+	}
+
+	opts.SetClientID(fmt.Sprintf("cp-agent-%s", clusterID))
+	opts.SetAutoReconnect(true)
+	opts.SetConnectRetry(true)
+	opts.SetConnectRetryInterval(5 * time.Second)
+	opts.SetKeepAlive(60 * time.Second)
+
+	opts.SetOnConnectHandler(func(client mqtt.Client) {
+		log.Printf("[INFO] Agent %s connected to MQTT broker, subscribing topics...", clusterID)
+		if token := client.Subscribe(cfpTopic, 1, handleCFP); token.Wait() && token.Error() != nil {
+			log.Printf("[ERROR] Failed to subscribe to %s: %v", cfpTopic, token.Error())
+		}
+		if token := client.Subscribe(execTopic, 1, handleExecute); token.Wait() && token.Error() != nil {
+			log.Printf("[ERROR] Failed to subscribe to %s: %v", execTopic, token.Error())
+		}
 	})
+
+	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
+		log.Printf("[WARN] Connection to MQTT broker lost: %v. Reconnecting...", err)
+	})
+
+	mqttClient := mqtt.NewClient(opts)
+	for {
+		if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
+			log.Printf("[WARN] Initial MQTT connect failed: %v, retrying in 5s...", token.Error())
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		break
+	}
 
 	select {}
 }
