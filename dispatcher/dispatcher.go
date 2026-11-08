@@ -254,7 +254,7 @@ func main() {
 	dispatcher = NewDispatcher(client)
 	for {
 		if token := client.Connect(); token.Wait() && token.Error() != nil {
-			log.Fatalf("[WARN] Initial MQTT connect failed: %v, retrying in 5s...", token.Error())
+			log.PrintF("[WARN] Initial MQTT connect failed: %v, retrying in 5s...", token.Error())
 			time.Sleep(5 * time.Second)
 			continue
 		}
