@@ -12,6 +12,35 @@ Zoptymalizowany pod kątem działania na architekturze ARM64 (K3s na Raspberry P
 - `CLUSTER_ID` - identyfikator węzła dodawany do tematu MQTT
 - `KUBECONFIG` - ścieżka do autoryzacji (domyślnie InClusterConfig lub `~/.kube/config`)
 
+## Architektura projektu
+
+```text
+edge-k8s-platform/
+├── main.go                    #Inicjalizacja konfiguracji, klienta K8s i start agenta
+├── internal/
+│   ├── config/
+│   │   └── config.go          # Zmienne środowiskowe, tematy MQTT, timeouty i wagi algorytmu licytacji
+│   ├── model/
+│   │   └── model.go           # Modele domenowe (TaskCFP, BidPayload, TaskResult, ClusterResources) oraz ReservationTracker
+│   ├── k8s/
+│   │   ├── client.go          # Inicjalizacja połączenia z API Kubernetes (InClusterConfig / kubeconfig)
+│   │   ├── metrics.go         # Pobieranie dostępnych zasobów węzłów (CPU/RAM) z Metrics API i sprawdzanie cache'u obrazów
+│   │   └── executor.go        # Tworzenie podów z zadaniami, monitorowanie ich statusu oraz czyszczenie po zakończeniu
+│   └── agent/
+│       ├── agent.go           # Logika biznesowa agenta: obsługa aukcji (CFP) oraz wykonywania zadań (Execute)
+│       └── mqtt.go            # Konfiguracja klienta MQTT, automatyczne wznawianie połączenia, subskrypcje i publikacja JSON
+└── dispatcher/
+    └── dispatcher.go         
+```
+
+### Przepływ działania agenta
+1. **Start (`main.go`)**: Wczytuje konfigurację (`internal/config`), tworzy klienta Kubernetes (`internal/k8s`) oraz uruchamia instancję `agent.Agent`.
+2. **Obsługa licytacji (`(mqtt) clusterless/auction/cfp`)**:
+   - Po otrzymaniu zapytania `TaskCFP` agent odpytuje API Kubernetes (`k8s.GetClusterResources`) o wolne zasoby CPU/RAM pomniejszone o aktualnie zarezerwowane zadania (`model.ReservationTracker`) oraz weryfikuje, czy wymagany obraz kontenera znajduje się już w pamięci podręcznej węzła.
+   - Jeśli klaster spełnia minimalne wymagania zadania, wylicza wynik oferty (`Score` z premią `CachedImageBonus` za lokalny obraz) i publikuje `BidPayload` na `(mqtt) clusterless/auction/bids`.
+3. **Wykonywanie zadania (`(mqtt) clusterless/execute/<CLUSTER_ID>`)**:
+   - Zwycięski klaster rezerwuje zasoby w `ReservationTracker`, tworzy jednorazowy Pod (`k8s.ExecuteFunctionPod`), oczekuje na jego zakończenie, publikuje wynik (`TaskResult`) na `(mqtt) clusterless/results`, a następnie usuwa Pod i zwalnia rezerwację.
+
 ## Wdrożenie fizyczne (ARM64)
 Repozytorium zawiera gotową paczkę `rpi-agent-deploy.tar.gz` (binarka + usługa systemd).
 
