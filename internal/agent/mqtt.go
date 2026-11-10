@@ -7,20 +7,24 @@ import (
 	"net/url"
 	"time"
 
-	"k8s-mqtt-agent/internal/config"
+	"k8s-mqtt-agent/pkg/protocol"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+)
+
+const (
+	agentClientIDFmt = "cp-agent-%s"
 )
 
 func (a *Agent) newMQTTClientOptions(broker string) *mqtt.ClientOptions {
 	opts := mqtt.NewClientOptions()
 	configureBrokerAddress(opts, broker)
 
-	opts.SetClientID(fmt.Sprintf("cp-agent-%s", a.clusterID))
+	opts.SetClientID(fmt.Sprintf(agentClientIDFmt, a.clusterID))
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
-	opts.SetConnectRetryInterval(config.MQTTRetryInterval)
-	opts.SetKeepAlive(config.MQTTKeepAlive)
+	opts.SetConnectRetryInterval(protocol.MQTTRetryInterval)
+	opts.SetKeepAlive(protocol.MQTTKeepAlive)
 	opts.SetOnConnectHandler(a.onConnect)
 	opts.SetConnectionLostHandler(a.onConnectionLost)
 
@@ -29,7 +33,7 @@ func (a *Agent) newMQTTClientOptions(broker string) *mqtt.ClientOptions {
 
 func (a *Agent) onConnect(client mqtt.Client) {
 	log.Printf("[INFO] Agent %s connected to MQTT broker, subscribing topics...", a.clusterID)
-	subscribeTopic(client, config.TopicCFP, a.handleCFP)
+	subscribeTopic(client, protocol.TopicCFP, a.handleCFP)
 	subscribeTopic(client, a.execTopic(), a.handleExecute)
 }
 
@@ -52,8 +56,8 @@ func configureBrokerAddress(opts *mqtt.ClientOptions, broker string) {
 func connectWithRetry(client mqtt.Client) {
 	for {
 		if token := client.Connect(); token.Wait() && token.Error() != nil {
-			log.Printf("[WARN] Initial MQTT connect failed: %v, retrying in 5s...", token.Error())
-			time.Sleep(config.MQTTRetryInterval)
+			log.Printf("[WARN] Initial MQTT connect failed: %v, retrying in %v...", token.Error(), protocol.MQTTRetryInterval)
+			time.Sleep(protocol.MQTTRetryInterval)
 			continue
 		}
 		return
@@ -61,7 +65,7 @@ func connectWithRetry(client mqtt.Client) {
 }
 
 func subscribeTopic(client mqtt.Client, topic string, handler mqtt.MessageHandler) {
-	if token := client.Subscribe(topic, config.MQTTQoS, handler); token.Wait() && token.Error() != nil {
+	if token := client.Subscribe(topic, protocol.MQTTQoS, handler); token.Wait() && token.Error() != nil {
 		log.Printf("[ERROR] Failed to subscribe to %s: %v", topic, token.Error())
 	}
 }
@@ -72,5 +76,7 @@ func publishJSON(client mqtt.Client, topic string, payload any) {
 		log.Printf("[ERROR] Failed to marshal payload for %s: %v", topic, err)
 		return
 	}
-	client.Publish(topic, config.MQTTQoS, false, data)
+	if token := client.Publish(topic, protocol.MQTTQoS, false, data); token.Wait() && token.Error() != nil {
+		log.Printf("[ERROR] Failed to publish message to %s: %v", topic, token.Error())
+	}
 }

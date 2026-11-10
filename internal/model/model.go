@@ -3,32 +3,18 @@ package model
 import (
 	"sync"
 
-	"k8s-mqtt-agent/internal/config"
+	"k8s-mqtt-agent/pkg/protocol"
 )
 
-type TaskCFP struct {
-	TaskID      string   `json:"task_id"`
-	Image       string   `json:"image"`
-	Command     []string `json:"command"`
-	MinCPUMilli int64    `json:"min_cpu_milli"`
-	MinMemMiB   int64    `json:"min_mem_mib"`
-}
+const (
+	CachedImageBonus = 500
+)
 
-type BidPayload struct {
-	TaskID        string `json:"task_id"`
-	ClusterID     string `json:"cluster_id"`
-	AvailCPUMilli int64  `json:"avail_cpu_milli"`
-	AvailMemMiB   int64  `json:"avail_mem_mib"`
-	ImageCached   bool   `json:"image_cached"`
-	Score         int64  `json:"score"`
-}
-
-type TaskResult struct {
-	TaskID     string `json:"task_id"`
-	ClusterID  string `json:"cluster_id"`
-	Status     string `json:"status"`
-	DurationMs int64  `json:"duration_ms"`
-}
+// Re-export protocol DTOs as type aliases for backward compatibility within agent packages.
+type TaskCFP = protocol.TaskCFP
+type BidPayload = protocol.BidPayload
+type AckPayload = protocol.AckPayload
+type TaskResult = protocol.TaskResult
 
 type ClusterResources struct {
 	AvailCPUMilli int64
@@ -36,30 +22,30 @@ type ClusterResources struct {
 	ImageCached   bool
 }
 
-func (r ClusterResources) CanFit(task TaskCFP) bool {
+func (r ClusterResources) CanFit(task protocol.TaskCFP) bool {
 	return r.AvailCPUMilli >= task.MinCPUMilli && r.AvailMemMiB >= task.MinMemMiB
 }
 
 func (r ClusterResources) CalculateScore() int64 {
 	score := r.AvailCPUMilli
 	if r.ImageCached {
-		score += config.CachedImageBonus
+		score += CachedImageBonus
 	}
 	return score
 }
 
 type ReservationTracker struct {
 	mu    sync.Mutex
-	tasks map[string]TaskCFP
+	tasks map[string]protocol.TaskCFP
 }
 
 func NewReservationTracker() *ReservationTracker {
 	return &ReservationTracker{
-		tasks: make(map[string]TaskCFP),
+		tasks: make(map[string]protocol.TaskCFP),
 	}
 }
 
-func (r *ReservationTracker) Reserve(task TaskCFP) {
+func (r *ReservationTracker) Reserve(task protocol.TaskCFP) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tasks[task.TaskID] = task
