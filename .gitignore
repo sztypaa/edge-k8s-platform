@@ -1,4 +1,5 @@
-agent-arm64
-agent
+/target/*
+!/target/.gitkeep
+
 .DS_Store
 .idea/
