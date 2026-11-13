@@ -7,7 +7,10 @@ import (
 )
 
 const (
-	CachedImageBonus = 500
+	ScoreWeightCPU   = 0.4
+	ScoreWeightMem   = 0.2
+	ScoreWeightImage = 0.4
+	ScoreScale       = 1000
 )
 
 // Re-export protocol DTOs as type aliases for backward compatibility within agent packages.
@@ -19,6 +22,8 @@ type TaskResult = protocol.TaskResult
 type ClusterResources struct {
 	AvailCPUMilli int64
 	AvailMemMiB   int64
+	TotalCPUMilli int64
+	TotalMemMiB   int64
 	ImageCached   bool
 }
 
@@ -26,12 +31,28 @@ func (r ClusterResources) CanFit(task protocol.TaskCFP) bool {
 	return r.AvailCPUMilli >= task.MinCPUMilli && r.AvailMemMiB >= task.MinMemMiB
 }
 
-func (r ClusterResources) CalculateScore() int64 {
-	score := r.AvailCPUMilli
-	if r.ImageCached {
-		score += CachedImageBonus
+func (r ClusterResources) CalculateScore(task protocol.TaskCFP) int64 {
+	return Score(r.AvailCPUMilli, r.AvailMemMiB, r.TotalCPUMilli, r.TotalMemMiB, r.ImageCached, task)
+}
+
+// Score = 1000 * (0.4*cpu + 0.2*mem + 0.4*cached), where cpu and mem are the
+// share of the cluster that stays free after the task is placed.
+func Score(availCPU, availMem, totalCPU, totalMem int64, imageCached bool, task protocol.TaskCFP) int64 {
+	if totalCPU <= 0 || totalMem <= 0 {
+		return 0
 	}
-	return score
+	cpuRatio := ratio(availCPU-task.MinCPUMilli, totalCPU)
+	memRatio := ratio(availMem-task.MinMemMiB, totalMem)
+
+	score := ScoreWeightCPU*cpuRatio + ScoreWeightMem*memRatio
+	if imageCached {
+		score += ScoreWeightImage
+	}
+	return int64(score * ScoreScale)
+}
+
+func ratio(left, total int64) float64 {
+	return min(max(float64(left)/float64(total), 0), 1)
 }
 
 type ReservationTracker struct {

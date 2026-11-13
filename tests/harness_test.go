@@ -32,14 +32,16 @@ type AuctionTrace struct {
 	RoundTripTime time.Duration
 }
 
-type ScoreFormula func(bid BidPayload) int64
+type ScoreFormula func(bid BidPayload, req TaskCFP) int64
 
-func CurrentDefaultScoreFormula(bid BidPayload) int64 {
-	score := bid.AvailCPUMilli
-	if bid.ImageCached {
-		score += model.CachedImageBonus
+func CurrentDefaultScoreFormula(bid BidPayload, req TaskCFP) int64 {
+	if req.MinCPUMilli == 0 {
+		req.MinCPUMilli = protocol.DefaultTaskMinCPUMilli
 	}
-	return score
+	if req.MinMemMiB == 0 {
+		req.MinMemMiB = protocol.DefaultTaskMinMemMiB
+	}
+	return model.Score(bid.AvailCPUMilli, bid.AvailMemMiB, bid.TotalCPUMilli, bid.TotalMemMiB, bid.ImageCached, req)
 }
 
 type Expectation func(t *testing.T, trace *AuctionTrace)
@@ -409,7 +411,7 @@ func ExpectBidScoresMatchFormula(formula ScoreFormula) Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
 		for _, bid := range trace.Bids {
-			expected := formula(bid)
+			expected := formula(bid, trace.Request)
 			if bid.Score != expected {
 				t.Errorf("Invalid score for cluster %s: got %d, expected %d (AvailCPU=%dm, AvailMem=%dMiB, Cached=%v)",
 					bid.ClusterID, bid.Score, expected, bid.AvailCPUMilli, bid.AvailMemMiB, bid.ImageCached)

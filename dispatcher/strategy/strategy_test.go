@@ -205,17 +205,17 @@ func TestReauctionStrategy_CreatesNewAuction(t *testing.T) {
 }
 
 func TestResolveStrategy(t *testing.T) {
-	s1 := ResolveStrategy("fallback")
+	s1 := ResolveStrategy("fallback", nil)
 	if s1.Name() != protocol.StrategyRankingFallback {
 		t.Errorf("Expected fallback, got %s", s1.Name())
 	}
 
-	s2 := ResolveStrategy("reauction")
+	s2 := ResolveStrategy("reauction", nil)
 	if s2.Name() != protocol.StrategyReauction {
 		t.Errorf("Expected reauction, got %s", s2.Name())
 	}
 
-	s3 := ResolveStrategy("unknown")
+	s3 := ResolveStrategy("unknown", nil)
 	if s3.Name() != protocol.StrategyRankingFallback {
 		t.Errorf("Expected default to fallback, got %s", s3.Name())
 	}

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,9 +24,7 @@ const (
 	defaultDispatcherClientID = "clusterless-central-dispatcher"
 	endpointSubmit            = "/submit"
 
-	defaultTaskImage       = "busybox:latest"
-	defaultTaskMinCPUMilli = int64(200)
-	defaultTaskMinMemMiB   = int64(128)
+	defaultTaskImage = "busybox:latest"
 )
 
 var defaultTaskCommand = []string{"sh", "-c", "echo 'Running serverless task...'; sleep 2; echo 'Task done'"}
@@ -179,7 +178,7 @@ type Dispatcher struct {
 
 func NewDispatcher(client mqtt.Client, strat strategy.AuctioneerStrategy) *Dispatcher {
 	if strat == nil {
-		strat = strategy.ResolveStrategy(protocol.DefaultStrategy)
+		strat = strategy.ResolveStrategy(protocol.DefaultStrategy, nil)
 	}
 	return &Dispatcher{
 		mqttClient: client,
@@ -289,10 +288,10 @@ func (d *Dispatcher) runAuction(ctx context.Context, req protocol.TaskCFP) (*pro
 		req.Command = defaultTaskCommand
 	}
 	if req.MinCPUMilli == 0 {
-		req.MinCPUMilli = defaultTaskMinCPUMilli
+		req.MinCPUMilli = protocol.DefaultTaskMinCPUMilli
 	}
 	if req.MinMemMiB == 0 {
-		req.MinMemMiB = defaultTaskMinMemMiB
+		req.MinMemMiB = protocol.DefaultTaskMinMemMiB
 	}
 
 	return d.strategy.RunAuction(ctx, d, req)
@@ -322,6 +321,16 @@ func (d *Dispatcher) handleHTTPSubmit(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
+func splitList(s string) []string {
+	var items []string
+	for _, item := range strings.Split(s, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
 func getEnv(key, fallback string) string {
 	if val, ok := os.LookupEnv(key); ok {
 		return val
@@ -330,12 +339,13 @@ func getEnv(key, fallback string) string {
 }
 
 func main() {
-	strategyFlag := flag.String("strategy", getEnv("DISPATCHER_STRATEGY", protocol.DefaultStrategy), "Auctioneer strategy: 'fallback' (ranking fallback) or 'reauction'")
+	strategyFlag := flag.String("strategy", getEnv("DISPATCHER_STRATEGY", protocol.DefaultStrategy), "Auctioneer strategy: 'fallback' (ranking fallback), 'reauction', or 'roundrobin'/'random' (benchmarks)")
+	clustersFlag := flag.String("clusters", getEnv("CLUSTERS", ""), "Comma separated cluster IDs for 'roundrobin' and 'random', e.g. rpi-1,rpi-2")
 	brokerFlag := flag.String("broker", getEnv("MQTT_BROKER", protocol.DefaultMQTTBroker), "MQTT broker address")
 	httpAddrFlag := flag.String("http", getEnv("HTTP_ADDR", protocol.DefaultHTTPAddr), "HTTP server listen address")
 	flag.Parse()
 
-	strat := strategy.ResolveStrategy(*strategyFlag)
+	strat := strategy.ResolveStrategy(*strategyFlag, splitList(*clustersFlag))
 	log.Printf("[INIT] Dispatcher strategy configured: %s (fixed for application lifetime)", strat.Name())
 
 	mqttUser := getEnv("MQTT_USER", protocol.DefaultMQTTUser)

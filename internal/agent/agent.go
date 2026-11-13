@@ -80,13 +80,15 @@ func (a *Agent) handleCFP(client mqtt.Client, msg mqtt.Message) {
 		ClusterID:     a.clusterID,
 		AvailCPUMilli: res.AvailCPUMilli,
 		AvailMemMiB:   res.AvailMemMiB,
+		TotalCPUMilli: res.TotalCPUMilli,
+		TotalMemMiB:   res.TotalMemMiB,
 		ImageCached:   res.ImageCached,
-		Score:         res.CalculateScore(),
+		Score:         res.CalculateScore(cfp),
 	}
 
 	publishJSON(client, protocol.TopicBids, bid)
-	log.Printf("[BID SENT] Task: %s | AvailCPU: %dm | AvailMem: %dMiB | Cached: %v | Score: %d",
-		cfp.TaskID, res.AvailCPUMilli, res.AvailMemMiB, res.ImageCached, bid.Score)
+	log.Printf("[BID SENT] Task: %s | AvailCPU: %d/%dm | AvailMem: %d/%dMiB | Cached: %v | Score: %d",
+		cfp.TaskID, res.AvailCPUMilli, res.TotalCPUMilli, res.AvailMemMiB, res.TotalMemMiB, res.ImageCached, bid.Score)
 }
 
 func (a *Agent) handleExecute(client mqtt.Client, msg mqtt.Message) {
@@ -96,7 +98,7 @@ func (a *Agent) handleExecute(client mqtt.Client, msg mqtt.Message) {
 		return
 	}
 
-	accepted, reason := a.tryAcceptAndReserve(task)
+	accepted, imageCached, reason := a.tryAcceptAndReserve(task)
 	if !accepted {
 		publishJSON(client, protocol.TopicAck, model.AckPayload{
 			TaskID:    task.TaskID,
@@ -116,10 +118,10 @@ func (a *Agent) handleExecute(client mqtt.Client, msg mqtt.Message) {
 	log.Printf("[EXECUTING] Task %s accepted (ACK) by %s (reserved %dm CPU, %dMiB Mem). Spawning pod...",
 		task.TaskID, a.clusterID, task.MinCPUMilli, task.MinMemMiB)
 
-	go a.runTask(client, task)
+	go a.runTask(client, task, imageCached)
 }
 
-func (a *Agent) tryAcceptAndReserve(task model.TaskCFP) (bool, string) {
+func (a *Agent) tryAcceptAndReserve(task model.TaskCFP) (bool, bool, string) {
 	a.execMu.Lock()
 	defer a.execMu.Unlock()
 
@@ -129,19 +131,19 @@ func (a *Agent) tryAcceptAndReserve(task model.TaskCFP) (bool, string) {
 	res, err := k8s.GetClusterResources(ctx, a.clientset, a.reservations, task.Image)
 	if err != nil {
 		log.Printf("[ERROR] Failed to verify cluster resources before executing %s: %v", task.TaskID, err)
-		return false, fmt.Sprintf("metrics read error: %v", err)
+		return false, false, fmt.Sprintf("metrics read error: %v", err)
 	}
 
 	if !res.CanFit(task) {
-		return false, fmt.Sprintf("insufficient resources (avail CPU: %dm, Mem: %dMiB, required CPU: %dm, Mem: %dMiB)",
+		return false, false, fmt.Sprintf("insufficient resources (avail CPU: %dm, Mem: %dMiB, required CPU: %dm, Mem: %dMiB)",
 			res.AvailCPUMilli, res.AvailMemMiB, task.MinCPUMilli, task.MinMemMiB)
 	}
 
 	a.reservations.Reserve(task)
-	return true, ""
+	return true, res.ImageCached, ""
 }
 
-func (a *Agent) runTask(client mqtt.Client, task model.TaskCFP) {
+func (a *Agent) runTask(client mqtt.Client, task model.TaskCFP, imageCached bool) {
 	defer a.reservations.Release(task.TaskID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), protocol.DefaultExecutionTimeout)
@@ -149,10 +151,11 @@ func (a *Agent) runTask(client mqtt.Client, task model.TaskCFP) {
 
 	status, duration := k8s.ExecuteFunctionPod(ctx, a.clientset, a.namespace, task)
 	res := model.TaskResult{
-		TaskID:     task.TaskID,
-		ClusterID:  a.clusterID,
-		Status:     status,
-		DurationMs: duration,
+		TaskID:      task.TaskID,
+		ClusterID:   a.clusterID,
+		Status:      status,
+		DurationMs:  duration,
+		ImageCached: imageCached,
 	}
 
 	publishJSON(client, protocol.TopicResults, res)

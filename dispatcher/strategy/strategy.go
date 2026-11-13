@@ -281,11 +281,16 @@ func (s *ReauctionStrategy) executeSingleAuction(ctx context.Context, mgr Auctio
 // Supported names (case-insensitive):
 // - "fallback", "ranking": RankingFallbackStrategy
 // - "reauction", "retry": ReauctionStrategy
-func ResolveStrategy(name string) AuctioneerStrategy {
+// - "roundrobin", "random": BaselineStrategy over the given clusters (benchmarks only)
+func ResolveStrategy(name string, clusters []string) AuctioneerStrategy {
 	normalized := strings.ToLower(strings.TrimSpace(name))
 	switch normalized {
 	case "reauction", "retry":
 		return NewReauctionStrategy()
+	case protocol.StrategyRoundRobin:
+		return NewRoundRobinStrategy(clusters)
+	case protocol.StrategyRandom:
+		return NewRandomStrategy(clusters)
 	case "fallback", "ranking":
 		fallthrough
 	default:

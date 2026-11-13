@@ -40,6 +40,8 @@ const (
 	// Auctioneer strategy identifiers
 	StrategyRankingFallback = "fallback"
 	StrategyReauction       = "reauction"
+	StrategyRoundRobin      = "roundrobin"
+	StrategyRandom          = "random"
 	DefaultStrategy         = StrategyRankingFallback
 
 	// Default auction timing and retry parameters
@@ -47,6 +49,10 @@ const (
 	DefaultAckTimeout       = 3 * time.Second
 	DefaultExecutionTimeout = 2 * time.Minute
 	DefaultMaxReauctions    = 3
+
+	// Default task requirements used by the dispatcher when the request leaves them empty
+	DefaultTaskMinCPUMilli = int64(200)
+	DefaultTaskMinMemMiB   = int64(128)
 )
 
 // TopicExecute returns the MQTT topic used to dispatch a task to a specific cluster.
@@ -70,6 +76,8 @@ type BidPayload struct {
 	ClusterID     string `json:"cluster_id"`
 	AvailCPUMilli int64  `json:"avail_cpu_milli"`
 	AvailMemMiB   int64  `json:"avail_mem_mib"`
+	TotalCPUMilli int64  `json:"total_cpu_milli"`
+	TotalMemMiB   int64  `json:"total_mem_mib"`
 	ImageCached   bool   `json:"image_cached"`
 	Score         int64  `json:"score"`
 }
@@ -84,8 +92,9 @@ type AckPayload struct {
 
 // TaskResult represents the final execution outcome published by the executing cluster.
 type TaskResult struct {
-	TaskID     string `json:"task_id"`
-	ClusterID  string `json:"cluster_id"`
-	Status     string `json:"status"`
-	DurationMs int64  `json:"duration_ms"`
+	TaskID      string `json:"task_id"`
+	ClusterID   string `json:"cluster_id"`
+	Status      string `json:"status"`
+	DurationMs  int64  `json:"duration_ms"`
+	ImageCached bool   `json:"image_cached"`
 }
