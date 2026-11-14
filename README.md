@@ -16,30 +16,35 @@ Zoptymalizowany pod kątem działania na architekturze ARM64 (K3s na Raspberry P
 
 ```text
 edge-k8s-platform/
-├── main.go                    #Inicjalizacja konfiguracji, klienta K8s i start agenta
-├── internal/
-│   ├── config/
-│   │   └── config.go          # Zmienne środowiskowe, tematy MQTT, timeouty i wagi algorytmu licytacji
-│   ├── model/
-│   │   └── model.go           # Modele domenowe (TaskCFP, BidPayload, TaskResult, ClusterResources) oraz ReservationTracker
-│   ├── k8s/
-│   │   ├── client.go          # Inicjalizacja połączenia z API Kubernetes (InClusterConfig / kubeconfig)
-│   │   ├── metrics.go         # Pobieranie dostępnych zasobów węzłów (CPU/RAM) z Metrics API i sprawdzanie cache'u obrazów
-│   │   └── executor.go        # Tworzenie podów z zadaniami, monitorowanie ich statusu oraz czyszczenie po zakończeniu
-│   └── agent/
-│       ├── agent.go           # Logika biznesowa agenta: obsługa aukcji (CFP) oraz wykonywania zadań (Execute)
-│       └── mqtt.go            # Konfiguracja klienta MQTT, automatyczne wznawianie połączenia, subskrypcje i publikacja JSON
-└── dispatcher/
-    └── dispatcher.go         
+├── main.go                    # Inicjalizacja konfiguracji, klienta K8s i start agenta (moduł k8s-mqtt-agent)
+├── pkg/
+│   └── protocol/              # Wspólny, czysty protokół komunikacyjny (TaskCFP, BidPayload, AckPayload, TaskResult, tematy MQTT)
+├── internal/                  # Wewnętrzne komponenty agenta K8s (zależne od k8s.io)
+│   ├── config/                # Konfiguracja środowiskowa agenta (CLUSTER_ID, KUBECONFIG itp.)
+│   ├── model/                 # Modele wewnętrzne agenta (ClusterResources, ReservationTracker)
+│   ├── k8s/                   # Integracja z Kubernetes API (client, metrics-server, pod executor)
+│   └── agent/                 # Pętla zdarzeń agenta, weryfikacja zasobów i obsługa ACK/RES
+├── dispatcher/                # Niezależny moduł licytatora (własny go.mod, zero zależności od K8s)
+│   ├── go.mod                 # Zależności wyłącznie od MQTT i pkg/protocol
+│   ├── dispatcher.go          # Centralny serwer HTTP/MQTT rozstrzygający licytacje
+│   └── strategy/              # Wymienne strategie licytatora (fallback ranking, re-auction)
+└── tests/                     # Integracyjny zestaw testowy
 ```
 
-### Przepływ działania agenta
-1. **Start (`main.go`)**: Wczytuje konfigurację (`internal/config`), tworzy klienta Kubernetes (`internal/k8s`) oraz uruchamia instancję `agent.Agent`.
-2. **Obsługa licytacji (`(mqtt) clusterless/auction/cfp`)**:
-   - Po otrzymaniu zapytania `TaskCFP` agent odpytuje API Kubernetes (`k8s.GetClusterResources`) o wolne zasoby CPU/RAM pomniejszone o aktualnie zarezerwowane zadania (`model.ReservationTracker`) oraz weryfikuje, czy wymagany obraz kontenera znajduje się już w pamięci podręcznej węzła.
-   - Jeśli klaster spełnia minimalne wymagania zadania, wylicza wynik oferty (`Score` z premią `CachedImageBonus` za lokalny obraz) i publikuje `BidPayload` na `(mqtt) clusterless/auction/bids`.
-3. **Wykonywanie zadania (`(mqtt) clusterless/execute/<CLUSTER_ID>`)**:
-   - Zwycięski klaster rezerwuje zasoby w `ReservationTracker`, tworzy jednorazowy Pod (`k8s.ExecuteFunctionPod`), oczekuje na jego zakończenie, publikuje wynik (`TaskResult`) na `(mqtt) clusterless/results`, a następnie usuwa Pod i zwalnia rezerwację.
+### Przepływ działania systemu i protokół dwufazowy (Two-Phase Dispatch)
+1. **Zgłoszenie zadania**: Klient wysyła `TaskCFP` przez HTTP `/submit` lub MQTT `clusterless/requests/submit`.
+2. **Zapytanie ofertowe (`clusterless/auction/cfp`)**:
+   - Dispatcher ogłasza aukcję. Agenci na klastrach sprawdzają stan wolnych zasobów i cache'u obrazu, publikując oferty `BidPayload` na `clusterless/auction/bids`.
+3. **Wybór kandydata i protokół ACK / RES (`clusterless/execute/<CLUSTER_ID>` oraz `clusterless/auction/ack`)**:
+   - Licytator typuje zwycięzcę według `Score` i przesyła mu zadanie.
+   - Wytypowany agent w sekcji krytycznej ponownie weryfikuje dostępność zasobów (`tryAcceptAndReserve`):
+     - **Akceptacja (`ACK`)**: Klaster rezerwuje zasoby w `ReservationTracker`, wysyła `AckPayload{Status: "ACK"}` i uruchamia jednorazowy Pod.
+     - **Rezygnacja (`RES`)**: W przypadku wygrania kilku aukcji równolegle i braku miejsca na kolejne zadanie, klaster natychmiast odsyła `AckPayload{Status: "RES", Reason: "..."}` bez blokowania zasobów.
+4. **Wymienne strategie licytatora (cel badawczy)**:
+   - **`fallback` (`RankingFallbackStrategy`, domyślna)**: Licytator generuje ranking ofert. W razie rezygnacji klastra natychmiast przekazuje zadanie kolejnemu kandydatowi z posortowanej listy.
+   - **`reauction` (`ReauctionStrategy`)**: W razie rezygnacji licytator restartuje licytację (nowy CFP), dzięki czemu pobiera świeże oferty uwzględniające już nowe obciążenie klastrów.
+   - Strategia jest wybierana przy uruchomieniu aplikacji i pozostaje stała w czasie jej działania. Konfiguracja odbywa się przez flagę startową CLI `-strategy` (np. `go run ./dispatcher -strategy=reauction`) lub zmienną środowiskową `DISPATCHER_STRATEGY=fallback|reauction`.
+5. **Wynik zadania (`clusterless/results`)**: Po zakończeniu Poda agent zwalnia rezerwację i publikuje `TaskResult`.
 
 ## Wdrożenie fizyczne (ARM64)
 Repozytorium zawiera gotową paczkę `rpi-agent-deploy.tar.gz` (binarka + usługa systemd).

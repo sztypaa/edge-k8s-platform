@@ -13,32 +13,14 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"k8s-mqtt-agent/internal/model"
+	"k8s-mqtt-agent/pkg/protocol"
 )
 
-type TaskCFP struct {
-	TaskID          string   `json:"task_id"`
-	OriginClusterID string   `json:"origin_cluster_id,omitempty"`
-	Image           string   `json:"image"`
-	Command         []string `json:"command"`
-	MinCPUMilli     int64    `json:"min_cpu_milli"`
-	MinMemMiB       int64    `json:"min_mem_mib"`
-}
-
-type BidPayload struct {
-	TaskID        string `json:"task_id"`
-	ClusterID     string `json:"cluster_id"`
-	AvailCPUMilli int64  `json:"avail_cpu_milli"`
-	AvailMemMiB   int64  `json:"avail_mem_mib"`
-	ImageCached   bool   `json:"image_cached"`
-	Score         int64  `json:"score"`
-}
-
-type TaskResult struct {
-	TaskID     string `json:"task_id"`
-	ClusterID  string `json:"cluster_id"`
-	Status     string `json:"status"`
-	DurationMs int64  `json:"duration_ms"`
-}
+type TaskCFP = protocol.TaskCFP
+type BidPayload = protocol.BidPayload
+type AckPayload = protocol.AckPayload
+type TaskResult = protocol.TaskResult
 
 type AuctionTrace struct {
 	Request       TaskCFP
@@ -46,6 +28,7 @@ type AuctionTrace struct {
 	Result        *TaskResult
 	ErrorResponse string
 	Bids          []BidPayload
+	Acks          []AckPayload
 	RoundTripTime time.Duration
 }
 
@@ -54,7 +37,7 @@ type ScoreFormula func(bid BidPayload) int64
 func CurrentDefaultScoreFormula(bid BidPayload) int64 {
 	score := bid.AvailCPUMilli
 	if bid.ImageCached {
-		score += 500
+		score += model.CachedImageBonus
 	}
 	return score
 }
@@ -79,6 +62,7 @@ type TestHarness struct {
 
 	mu      sync.Mutex
 	bids    map[string][]BidPayload
+	acks    map[string][]AckPayload
 	results map[string]chan TaskResult
 }
 
@@ -93,14 +77,15 @@ func NewTestHarness(t *testing.T) *TestHarness {
 	t.Helper()
 
 	h := &TestHarness{
-		DispatcherURL: getEnv("DISPATCHER_URL", "http://127.0.0.1:8080"),
-		MQTTBroker:    getEnv("MQTT_BROKER", "tcp://127.0.0.1:1883"),
-		MQTTUser:      getEnv("MQTT_USER", "clusterless_admin"),
-		MQTTPass:      getEnv("MQTT_PASS", "zaq1@WSX"),
+		DispatcherURL: getEnv("DISPATCHER_URL", "http://127.0.0.1"+protocol.DefaultHTTPAddr),
+		MQTTBroker:    getEnv("MQTT_BROKER", protocol.DefaultMQTTBroker),
+		MQTTUser:      getEnv("MQTT_USER", protocol.DefaultMQTTUser),
+		MQTTPass:      getEnv("MQTT_PASS", protocol.DefaultMQTTPass),
 		httpClient: &http.Client{
 			Timeout: 3 * time.Minute,
 		},
 		bids:    make(map[string][]BidPayload),
+		acks:    make(map[string][]AckPayload),
 		results: make(map[string]chan TaskResult),
 	}
 
@@ -113,8 +98,9 @@ func NewTestHarness(t *testing.T) *TestHarness {
 		SetConnectTimeout(5 * time.Second)
 
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
-		c.Subscribe("clusterless/auction/bids", 1, h.onBidReceived).Wait()
-		c.Subscribe("clusterless/results", 1, h.onResultReceived).Wait()
+		c.Subscribe(protocol.TopicBids, protocol.MQTTQoS, h.onBidReceived).Wait()
+		c.Subscribe(protocol.TopicAck, protocol.MQTTQoS, h.onAckReceived).Wait()
+		c.Subscribe(protocol.TopicResults, protocol.MQTTQoS, h.onResultReceived).Wait()
 	})
 
 	client := mqtt.NewClient(opts)
@@ -138,6 +124,16 @@ func (h *TestHarness) onBidReceived(_ mqtt.Client, msg mqtt.Message) {
 	}
 	h.mu.Lock()
 	h.bids[bid.TaskID] = append(h.bids[bid.TaskID], bid)
+	h.mu.Unlock()
+}
+
+func (h *TestHarness) onAckReceived(_ mqtt.Client, msg mqtt.Message) {
+	var ack AckPayload
+	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
+		return
+	}
+	h.mu.Lock()
+	h.acks[ack.TaskID] = append(h.acks[ack.TaskID], ack)
 	h.mu.Unlock()
 }
 
@@ -208,6 +204,10 @@ func (h *TestHarness) SubmitHTTP(ctx context.Context, req TaskCFP) (*AuctionTrac
 		trace.Bids = make([]BidPayload, len(bids))
 		copy(trace.Bids, bids)
 	}
+	if acks, ok := h.acks[req.TaskID]; ok {
+		trace.Acks = make([]AckPayload, len(acks))
+		copy(trace.Acks, acks)
+	}
 	h.mu.Unlock()
 
 	return trace, nil
@@ -237,7 +237,7 @@ func (h *TestHarness) SubmitMQTT(ctx context.Context, req TaskCFP) (*AuctionTrac
 	}
 
 	start := time.Now()
-	token := h.mqttClient.Publish("clusterless/requests/submit", 1, false, payload)
+	token := h.mqttClient.Publish(protocol.TopicSubmit, 1, false, payload)
 	token.Wait()
 	if token.Error() != nil {
 		return nil, fmt.Errorf("mqtt publish failed: %w", token.Error())
@@ -256,6 +256,10 @@ func (h *TestHarness) SubmitMQTT(ctx context.Context, req TaskCFP) (*AuctionTrac
 		if bids, ok := h.bids[req.TaskID]; ok {
 			trace.Bids = make([]BidPayload, len(bids))
 			copy(trace.Bids, bids)
+		}
+		if acks, ok := h.acks[req.TaskID]; ok {
+			trace.Acks = make([]AckPayload, len(acks))
+			copy(trace.Acks, acks)
 		}
 		h.mu.Unlock()
 		return trace, nil
@@ -306,6 +310,9 @@ func (h *TestHarness) RunCase(t *testing.T, tc AuctionTestCase) *AuctionTrace {
 	for _, b := range trace.Bids {
 		t.Logf("   -> Bid from %s: AvailCPU=%dm, AvailMem=%dMiB, Cached=%v, Score=%d",
 			b.ClusterID, b.AvailCPUMilli, b.AvailMemMiB, b.ImageCached, b.Score)
+	}
+	for _, a := range trace.Acks {
+		t.Logf("   -> Ack from %s: Status=%s, Reason=%s", a.ClusterID, a.Status, a.Reason)
 	}
 	if trace.Result != nil {
 		t.Logf("   => Winner: %s | Status=%s | Duration=%dms",
@@ -451,5 +458,37 @@ func ExpectHighestBidderWins() Expectation {
 			t.Errorf("Cluster %s won with Score=%d, although a higher bid with Score=%d was available",
 				trace.Result.ClusterID, winnerScore, maxScore)
 		}
+	}
+}
+
+func ExpectClusterAccepted(clusterID string) Expectation {
+	return func(t *testing.T, trace *AuctionTrace) {
+		t.Helper()
+		if len(trace.Acks) == 0 {
+			t.Logf("Note: no MQTT ACKs captured by observer for task %s", trace.Request.TaskID)
+			return
+		}
+		for _, a := range trace.Acks {
+			if a.ClusterID == clusterID && a.Status == protocol.AckStatusAccepted {
+				return
+			}
+		}
+		t.Errorf("Expected cluster %s to submit ACK, but got acks: %+v", clusterID, trace.Acks)
+	}
+}
+
+func ExpectClusterResigned(clusterID string) Expectation {
+	return func(t *testing.T, trace *AuctionTrace) {
+		t.Helper()
+		if len(trace.Acks) == 0 {
+			t.Logf("Note: no MQTT ACKs captured by observer for task %s", trace.Request.TaskID)
+			return
+		}
+		for _, a := range trace.Acks {
+			if a.ClusterID == clusterID && a.Status == protocol.AckStatusResigned {
+				return
+			}
+		}
+		t.Errorf("Expected cluster %s to submit RES (resignation), but got acks: %+v", clusterID, trace.Acks)
 	}
 }

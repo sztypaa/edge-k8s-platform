@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"k8s-mqtt-agent/pkg/protocol"
 )
 
 func TestAuctionScenarios(t *testing.T) {
@@ -17,7 +19,7 @@ func TestAuctionScenarios(t *testing.T) {
 			Request: TaskCFP{},
 			Expectations: []Expectation{
 				ExpectAuctionSuccess(),
-				ExpectPodStatus("Succeeded"),
+				ExpectPodStatus(protocol.TaskStatusSucceeded),
 				ExpectBidScoresMatchFormula(CurrentDefaultScoreFormula),
 				ExpectHighestBidderWins(),
 			},
@@ -32,7 +34,7 @@ func TestAuctionScenarios(t *testing.T) {
 			},
 			Expectations: []Expectation{
 				ExpectAuctionSuccess(),
-				ExpectPodStatus("Succeeded"),
+				ExpectPodStatus(protocol.TaskStatusSucceeded),
 				ExpectBidsMeetMinimumResources(),
 				ExpectBidScoresMatchFormula(CurrentDefaultScoreFormula),
 				ExpectHighestBidderWins(),
@@ -48,7 +50,7 @@ func TestAuctionScenarios(t *testing.T) {
 			},
 			Expectations: []Expectation{
 				ExpectAuctionSuccess(),
-				ExpectPodStatus("Failed"),
+				ExpectPodStatus(protocol.TaskStatusFailed),
 				ExpectBidsMeetMinimumResources(),
 				ExpectHighestBidderWins(),
 			},
@@ -110,7 +112,7 @@ func TestOriginClusterExclusion(t *testing.T) {
 		},
 		Expectations: []Expectation{
 			ExpectAuctionSuccess(),
-			ExpectPodStatus("Succeeded"),
+			ExpectPodStatus(protocol.TaskStatusSucceeded),
 		},
 	})
 
@@ -143,7 +145,7 @@ func TestOriginClusterExclusion(t *testing.T) {
 
 	if otherClusters > 0 {
 		ExpectAuctionSuccess()(t, offloadTrace)
-		ExpectPodStatus("Succeeded")(t, offloadTrace)
+		ExpectPodStatus(protocol.TaskStatusSucceeded)(t, offloadTrace)
 		ExpectHighestBidderWins()(t, offloadTrace)
 		t.Logf("Offloading succeeded: task from %s was executed by cluster %s", originCluster, offloadTrace.Result.ClusterID)
 	} else if offloadTrace.HTTPStatus == http.StatusServiceUnavailable {
@@ -164,7 +166,7 @@ func TestImageCacheBonus(t *testing.T) {
 		},
 		Expectations: []Expectation{
 			ExpectAuctionSuccess(),
-			ExpectPodStatus("Succeeded"),
+			ExpectPodStatus(protocol.TaskStatusSucceeded),
 		},
 	})
 
@@ -180,7 +182,7 @@ func TestImageCacheBonus(t *testing.T) {
 		},
 		Expectations: []Expectation{
 			ExpectAuctionSuccess(),
-			ExpectPodStatus("Succeeded"),
+			ExpectPodStatus(protocol.TaskStatusSucceeded),
 			ExpectBidScoresMatchFormula(CurrentDefaultScoreFormula),
 			ExpectHighestBidderWins(),
 			func(t *testing.T, trace *AuctionTrace) {
@@ -246,7 +248,7 @@ func TestConcurrentLoadAndReservation(t *testing.T) {
 		}
 		tr := traces[i]
 		ExpectAuctionSuccess()(t, tr)
-		ExpectPodStatus("Succeeded")(t, tr)
+		ExpectPodStatus(protocol.TaskStatusSucceeded)(t, tr)
 		ExpectBidsMeetMinimumResources()(t, tr)
 		ExpectBidScoresMatchFormula(CurrentDefaultScoreFormula)(t, tr)
 		ExpectHighestBidderWins()(t, tr)
@@ -303,11 +305,34 @@ func TestMQTTSubmission(t *testing.T) {
 	}
 
 	ExpectAuctionSuccess()(t, trace)
-	ExpectPodStatus("Succeeded")(t, trace)
+	ExpectPodStatus(protocol.TaskStatusSucceeded)(t, trace)
 	ExpectBidsMeetMinimumResources()(t, trace)
 	ExpectBidScoresMatchFormula(CurrentDefaultScoreFormula)(t, trace)
 	ExpectHighestBidderWins()(t, trace)
 
 	t.Logf("MQTT task succeeded on cluster %s in %dms (RTT=%v)",
 		trace.Result.ClusterID, trace.Result.DurationMs, trace.RoundTripTime.Round(time.Millisecond))
+}
+
+func TestAuctionExecutionWithAck(t *testing.T) {
+	h := NewTestHarness(t)
+
+	h.RunCase(t, AuctionTestCase{
+		Name: "Task execution with cluster ACK verification",
+		Request: TaskCFP{
+			Image:       "busybox:latest",
+			Command:     []string{"sh", "-c", "echo 'Strategy execution test'; sleep 1"},
+			MinCPUMilli: 50,
+			MinMemMiB:   32,
+		},
+		Expectations: []Expectation{
+			ExpectAuctionSuccess(),
+			ExpectPodStatus(protocol.TaskStatusSucceeded),
+			func(t *testing.T, trace *AuctionTrace) {
+				if len(trace.Acks) > 0 {
+					ExpectClusterAccepted(trace.Result.ClusterID)(t, trace)
+				}
+			},
+		},
+	})
 }

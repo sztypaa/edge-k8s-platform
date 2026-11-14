@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"k8s-mqtt-agent/internal/config"
 	"k8s-mqtt-agent/internal/model"
+	"k8s-mqtt-agent/pkg/protocol"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -16,25 +16,33 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func ExecuteFunctionPod(ctx context.Context, clientset *kubernetes.Clientset, task model.TaskCFP) (string, int64) {
+const (
+	podPollInterval     = 500 * time.Millisecond
+	workerAppLabelKey   = "app"
+	workerAppLabelValue = "clusterless-worker"
+	workerTaskLabelKey  = "task-id"
+	workerContainerName = "worker"
+)
+
+func ExecuteFunctionPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string, task model.TaskCFP) (string, int64) {
 	startTime := time.Now()
 	podName := fmt.Sprintf("fn-%s", strings.ToLower(task.TaskID))
-	podsClient := clientset.CoreV1().Pods(config.DefaultNamespace)
+	podsClient := clientset.CoreV1().Pods(namespace)
 
-	pod := buildFunctionPod(podName, task)
+	pod := buildFunctionPod(podName, namespace, task)
 	if _, err := podsClient.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		log.Printf("[ERROR] Failed to create pod %s: %v", podName, err)
-		return "FailedToCreate", 0
+		return protocol.TaskStatusFailedToCreate, 0
 	}
 
 	defer func() {
 		_ = podsClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
 	}()
 
-	return waitForPodCompletion(ctx, clientset, podName, startTime)
+	return waitForPodCompletion(ctx, clientset, namespace, podName, startTime)
 }
 
-func buildFunctionPod(podName string, task model.TaskCFP) *corev1.Pod {
+func buildFunctionPod(podName, namespace string, task model.TaskCFP) *corev1.Pod {
 	requests := corev1.ResourceList{}
 	if task.MinCPUMilli > 0 {
 		requests[corev1.ResourceCPU] = *resource.NewMilliQuantity(task.MinCPUMilli, resource.DecimalSI)
@@ -46,17 +54,17 @@ func buildFunctionPod(podName string, task model.TaskCFP) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
-			Namespace: config.DefaultNamespace,
+			Namespace: namespace,
 			Labels: map[string]string{
-				"app":     "clusterless-worker",
-				"task-id": task.TaskID,
+				workerAppLabelKey:  workerAppLabelValue,
+				workerTaskLabelKey: task.TaskID,
 			},
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
-					Name:            "worker",
+					Name:            workerContainerName,
 					Image:           task.Image,
 					ImagePullPolicy: corev1.PullIfNotPresent,
 					Command:         task.Command,
@@ -67,22 +75,22 @@ func buildFunctionPod(podName string, task model.TaskCFP) *corev1.Pod {
 	}
 }
 
-func waitForPodCompletion(ctx context.Context, clientset *kubernetes.Clientset, podName string, startTime time.Time) (string, int64) {
-	podsClient := clientset.CoreV1().Pods(config.DefaultNamespace)
+func waitForPodCompletion(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName string, startTime time.Time) (string, int64) {
+	podsClient := clientset.CoreV1().Pods(namespace)
 	for {
 		select {
 		case <-ctx.Done():
-			return "Timeout", time.Since(startTime).Milliseconds()
-		case <-time.After(config.PodPollInterval):
+			return protocol.TaskStatusTimeout, time.Since(startTime).Milliseconds()
+		case <-time.After(podPollInterval):
 			p, err := podsClient.Get(ctx, podName, metav1.GetOptions{})
 			if err != nil {
 				continue
 			}
 			switch p.Status.Phase {
 			case corev1.PodSucceeded:
-				return "Succeeded", time.Since(startTime).Milliseconds()
+				return protocol.TaskStatusSucceeded, time.Since(startTime).Milliseconds()
 			case corev1.PodFailed:
-				return "Failed", time.Since(startTime).Milliseconds()
+				return protocol.TaskStatusFailed, time.Since(startTime).Milliseconds()
 			}
 		}
 	}
