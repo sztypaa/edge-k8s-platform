@@ -24,6 +24,7 @@ const (
 	workerContainerName = "worker"
 )
 
+// ExecuteFunctionPod creates and runs [corev1.Pod]. Returns tuple of task status and pod execution time.
 func ExecuteFunctionPod(ctx context.Context, clientset *kubernetes.Clientset, namespace string, task model.TaskCFP) (string, int64) {
 	startTime := time.Now()
 	podName := fmt.Sprintf("fn-%s", strings.ToLower(task.TaskID))
@@ -42,6 +43,7 @@ func ExecuteFunctionPod(ctx context.Context, clientset *kubernetes.Clientset, na
 	return waitForPodCompletion(ctx, clientset, namespace, podName, startTime)
 }
 
+// buildFunctionPod builds [corev1.Pod] based on [model.TaskCFP].
 func buildFunctionPod(podName, namespace string, task model.TaskCFP) *corev1.Pod {
 	requests := corev1.ResourceList{}
 	if task.MinCPUMilli > 0 {
@@ -75,6 +77,7 @@ func buildFunctionPod(podName, namespace string, task model.TaskCFP) *corev1.Pod
 	}
 }
 
+// waitForPodCompletion awaits for pod to finish and returns tuple of task status and time since pod's start.
 func waitForPodCompletion(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName string, startTime time.Time) (string, int64) {
 	podsClient := clientset.CoreV1().Pods(namespace)
 	for {
