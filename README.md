@@ -36,7 +36,7 @@ edge-k8s-platform/
 2. **Zapytanie ofertowe (`clusterless/auction/cfp`)**:
    - Dispatcher ogłasza aukcję. Agenci na klastrach sprawdzają stan wolnych zasobów i cache'u obrazu, publikując oferty `BidPayload` na `clusterless/auction/bids`.
 3. **Wybór kandydata i protokół ACK / RES (`clusterless/execute/<CLUSTER_ID>` oraz `clusterless/auction/ack`)**:
-   - Licytator typuje zwycięzcę według `Score` i przesyła mu zadanie.
+   - Licytator typuje zwycięzcę według `Score` (opis niżej) i przesyła mu zadanie.
    - Wytypowany agent w sekcji krytycznej ponownie weryfikuje dostępność zasobów (`tryAcceptAndReserve`):
      - **Akceptacja (`ACK`)**: Klaster rezerwuje zasoby w `ReservationTracker`, wysyła `AckPayload{Status: "ACK"}` i uruchamia jednorazowy Pod.
      - **Rezygnacja (`RES`)**: W przypadku wygrania kilku aukcji równolegle i braku miejsca na kolejne zadanie, klaster natychmiast odsyła `AckPayload{Status: "RES", Reason: "..."}` bez blokowania zasobów.
@@ -45,6 +45,28 @@ edge-k8s-platform/
    - **`reauction` (`ReauctionStrategy`)**: W razie rezygnacji licytator restartuje licytację (nowy CFP), dzięki czemu pobiera świeże oferty uwzględniające już nowe obciążenie klastrów.
    - Strategia jest wybierana przy uruchomieniu aplikacji i pozostaje stała w czasie jej działania. Konfiguracja odbywa się przez flagę startową CLI `-strategy` (np. `go run ./dispatcher -strategy=reauction`) lub zmienną środowiskową `DISPATCHER_STRATEGY=fallback|reauction`.
 5. **Wynik zadania (`clusterless/results`)**: Po zakończeniu Poda agent zwalnia rezerwację i publikuje `TaskResult`.
+
+### Funkcja celu (`Score`)
+
+Każda składowa jest ułamkiem od 0 do 1, więc wynik nie zależy od wielkości klastra:
+
+```text
+cpu    = (wolne CPU - CPU zadania) / CPU klastra          (obcięte do 0..1)
+mem    = (wolna pamięć - pamięć zadania) / pamięć klastra (obcięte do 0..1)
+cached = 1, jeśli obraz jest już na węźle, inaczej 0
+
+Score = 1000 * (0.4 * cpu + 0.2 * mem + 0.4 * cached)
+```
+
+Przykłady (zadanie 500m CPU, 256 MiB, klaster 4 CPU, 4 GiB):
+
+| Klaster | Score |
+| --- | --- |
+| pusty, bez obrazu | 537 |
+| w połowie zajęty, z obrazem | 637 |
+| prawie pełny, z obrazem | 412 |
+
+Obraz na węźle oznacza szybszy start (bez pobierania), dlatego ma dużą wagę, ale nie wygrywa z klastrem, który jest prawie pełny. Wagi są w `internal/model/model.go`. Oferta zawiera też `total_cpu_milli` i `total_mem_mib`, żeby dało się sprawdzić wynik.
 
 ## Wdrożenie fizyczne (ARM64)
 Repozytorium zawiera gotową paczkę `rpi-agent-deploy.tar.gz` (binarka + usługa systemd).

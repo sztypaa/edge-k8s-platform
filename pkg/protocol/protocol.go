@@ -47,6 +47,10 @@ const (
 	DefaultAckTimeout       = 3 * time.Second
 	DefaultExecutionTimeout = 2 * time.Minute
 	DefaultMaxReauctions    = 3
+
+	// Default task requirements used by the dispatcher when the request leaves them empty
+	DefaultTaskMinCPUMilli = int64(200)
+	DefaultTaskMinMemMiB   = int64(128)
 )
 
 // TopicExecute returns the MQTT topic used to dispatch a task to a specific cluster.
@@ -70,6 +74,8 @@ type BidPayload struct {
 	ClusterID     string `json:"cluster_id"`
 	AvailCPUMilli int64  `json:"avail_cpu_milli"`
 	AvailMemMiB   int64  `json:"avail_mem_mib"`
+	TotalCPUMilli int64  `json:"total_cpu_milli"`
+	TotalMemMiB   int64  `json:"total_mem_mib"`
 	ImageCached   bool   `json:"image_cached"`
 	Score         int64  `json:"score"`
 }
