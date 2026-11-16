@@ -86,23 +86,23 @@ Jeśli Raspberry mają inną liczbę rdzeni niż 4, zmień `CPU` (np. `CPU=1200 
 
 ## Wykresy
 
-Skopiuj wyniki z VM na swój komputer:
+Skopiuj wyniki z VM na swój komputer (gotowe wykresy z testów są w `bench/results/`):
 ```
 scp main-kubernetes@192.168.1.120:~/bench-results/*.csv .
 ```
 i uruchom:
 ```
 pip install pandas matplotlib tabulate
-python bench/plot.py b1 b1.csv --outdir wyniki-b1
-python bench/plot.py b2 b2.csv --outdir wyniki-b2
-python bench/plot.py b3 b3.csv --outdir wyniki-b3
+python bench/plot.py b1 b1.csv --outdir bench/results/b1
+python bench/plot.py b2 b2.csv --outdir bench/results/b2
+python bench/plot.py b3 b3.csv --outdir bench/results/b3
 ```
 
 | Test | Tabela | Wykres |
 | --- | --- | --- |
-| B1 | średni czas działania poda przy zimnym i ciepłym starcie dla każdego obrazu, różnica = czas pobrania | `b1_start.png` |
-| B2 | średni czas, mediana, p95, odrzucone zadania, % ciepłych startów | `b2_funkcja_celu.png` |
-| B3 | wykonane i odrzucone zadania, rezygnacje (RES), wysłania na zadanie, czas do ACK, czas do odrzucenia zadania, najwięcej zadań naraz na jednym klastrze | `b3_strategie.png` |
+| B1 | średni czas działania poda przy zimnym i ciepłym starcie dla każdego obrazu, różnica = czas pobrania | `b1_chart.png` |
+| B2 | średni czas, mediana, p95, odrzucone zadania, % ciepłych startów | `b2_chart.png` |
+| B3 | wykonane i odrzucone zadania, rezygnacje (RES), wysłania na zadanie, czas do ACK, czas do odrzucenia zadania, najwięcej zadań naraz na jednym klastrze | `b3_chart.png` |
 
 W B3 kolumna `max_tasks_on_one_cluster` musi wynosić 1. Większa wartość oznacza, że klaster przyjął więcej, niż mieści.
 
