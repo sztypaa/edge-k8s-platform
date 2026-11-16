@@ -53,7 +53,7 @@ Limit wykonania zadania w systemie to 2 min (`DefaultExecutionTimeout`). Jeśli 
 
 ## B2 – funkcja celu
 
-Ta sama seria zadań (30 zadań średnio co 2 s, obrazy `fn-*`, popularniejsze częściej) dla dwóch wersji agenta. Przed każdą serią skrypt usuwa obrazy `fn-*` z Raspberry, żeby obie wersje startowały z tego samego stanu.
+Przed każdą serią skrypt usuwa obrazy `fn-*` z obu Raspberry, pobiera `fn-a` i `fn-b` na pierwsze, a `fn-c` i `fn-d` na drugie, i czeka minutę, aż Kubernetes zgłosi je w statusie węzłów. Potem wysyła tę samą serię zadań (30 zadań średnio co 5 s, popularniejsze obrazy częściej). Kolumna `image_cached` pokazuje, czy zadanie trafiło na klaster z obrazem. Domyślnie 3 serie.
 
 Nowa funkcja celu (obecny kod):
 ```

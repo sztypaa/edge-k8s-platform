@@ -53,14 +53,21 @@ remove_images() {
   sleep 45
 }
 
+# Pulls the given images on one Raspberry Pi: pull_images_on <worker> <image>...
+pull_images_on() {
+  local worker="$1"
+  shift
+  printf '%s\n' "${SSH_PASS}" | ssh -o StrictHostKeyChecking=accept-new "${worker}" "
+    IFS= read -r PW
+    for img in $*; do
+      printf '%s\n' \"\${PW}\" | sudo -S -p '' k3s crictl pull \"docker.io/\${img}\" >/dev/null
+    done
+  "
+}
+
 # Pulls the given images on every Raspberry Pi, so the next task starts warm on any cluster.
 pull_images() {
   for worker in "${WORKERS[@]}"; do
-    printf '%s\n' "${SSH_PASS}" | ssh -o StrictHostKeyChecking=accept-new "${worker}" "
-      IFS= read -r PW
-      for img in $*; do
-        printf '%s\n' \"\${PW}\" | sudo -S -p '' k3s crictl pull \"docker.io/\${img}\" >/dev/null
-      done
-    "
+    pull_images_on "${worker}" "$@"
   done
 }
