@@ -23,9 +23,7 @@ const (
 	defaultDispatcherClientID = "clusterless-central-dispatcher"
 	endpointSubmit            = "/submit"
 
-	defaultTaskImage       = "busybox:latest"
-	defaultTaskMinCPUMilli = int64(200)
-	defaultTaskMinMemMiB   = int64(128)
+	defaultTaskImage = "busybox:latest"
 )
 
 var defaultTaskCommand = []string{"sh", "-c", "echo 'Running serverless task...'; sleep 2; echo 'Task done'"}
@@ -316,10 +314,10 @@ func (d *Dispatcher) runAuction(ctx context.Context, req protocol.TaskCFP) (*pro
 		req.Command = defaultTaskCommand
 	}
 	if req.MinCPUMilli == 0 {
-		req.MinCPUMilli = defaultTaskMinCPUMilli
+		req.MinCPUMilli = protocol.DefaultTaskMinCPUMilli
 	}
 	if req.MinMemMiB == 0 {
-		req.MinMemMiB = defaultTaskMinMemMiB
+		req.MinMemMiB = protocol.DefaultTaskMinMemMiB
 	}
 
 	return d.strategy.RunAuction(ctx, d, req)

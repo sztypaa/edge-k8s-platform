@@ -39,7 +39,7 @@ func GetClusterResources(ctx context.Context, clientset *kubernetes.Clientset, r
 		return model.ClusterResources{}, err
 	}
 
-	var totalAvailCPU, totalAvailMem int64
+	var totalAvailCPU, totalAvailMem, totalCPU, totalMem int64
 	imageCached := false
 
 	for _, node := range nodes.Items {
@@ -54,6 +54,8 @@ func GetClusterResources(ctx context.Context, clientset *kubernetes.Clientset, r
 
 		totalAvailCPU += allocCPU - usedCPU
 		totalAvailMem += (allocMem - usedMem) / bytesPerMiB
+		totalCPU += allocCPU
+		totalMem += allocMem / bytesPerMiB
 
 		if isImageCachedOnNode(node, targetImage) {
 			imageCached = true
@@ -64,6 +66,8 @@ func GetClusterResources(ctx context.Context, clientset *kubernetes.Clientset, r
 	return model.ClusterResources{
 		AvailCPUMilli: max(int64(0), totalAvailCPU-reservedCPU),
 		AvailMemMiB:   max(int64(0), totalAvailMem-reservedMem),
+		TotalCPUMilli: totalCPU,
+		TotalMemMiB:   totalMem,
 		ImageCached:   imageCached,
 	}, nil
 }

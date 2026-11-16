@@ -90,13 +90,15 @@ func (a *Agent) handleCFP(client mqtt.Client, msg mqtt.Message) {
 		ClusterID:     a.clusterID,
 		AvailCPUMilli: res.AvailCPUMilli,
 		AvailMemMiB:   res.AvailMemMiB,
+		TotalCPUMilli: res.TotalCPUMilli,
+		TotalMemMiB:   res.TotalMemMiB,
 		ImageCached:   res.ImageCached,
-		Score:         res.CalculateScore(),
+		Score:         res.CalculateScore(cfp),
 	}
 
 	publishJSON(client, protocol.TopicBids, bid)
-	log.Printf("[BID SENT] Task: %s | AvailCPU: %dm | AvailMem: %dMiB | Cached: %v | Score: %d",
-		cfp.TaskID, res.AvailCPUMilli, res.AvailMemMiB, res.ImageCached, bid.Score)
+	log.Printf("[BID SENT] Task: %s | AvailCPU: %d/%dm | AvailMem: %d/%dMiB | Cached: %v | Score: %d",
+		cfp.TaskID, res.AvailCPUMilli, res.TotalCPUMilli, res.AvailMemMiB, res.TotalMemMiB, res.ImageCached, bid.Score)
 }
 
 // handleExecute defines callback for topic specified in [Agent.execTopic]

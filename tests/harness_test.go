@@ -22,6 +22,7 @@ type BidPayload = protocol.BidPayload
 type AckPayload = protocol.AckPayload
 type TaskResult = protocol.TaskResult
 
+// AuctionTrace contains data collected after [AuctionSession] ends.
 type AuctionTrace struct {
 	Request       TaskCFP
 	HTTPStatus    int
@@ -32,18 +33,25 @@ type AuctionTrace struct {
 	RoundTripTime time.Duration
 }
 
-type ScoreFormula func(bid BidPayload) int64
+// ScoreFormula is type for score-calculating functions.
+type ScoreFormula func(bid BidPayload, req TaskCFP) int64
 
-func CurrentDefaultScoreFormula(bid BidPayload) int64 {
-	score := bid.AvailCPUMilli
-	if bid.ImageCached {
-		score += model.CachedImageBonus
+// CurrentDefaultScoreFormula calculates score according to [model.Score]. 
+// If [req.MinCPUMilili] or [req.MinMemMiB] is 0 then their value is replaced with respective default from [protocol]
+func CurrentDefaultScoreFormula(bid BidPayload, req TaskCFP) int64 {
+	if req.MinCPUMilli == 0 {
+		req.MinCPUMilli = protocol.DefaultTaskMinCPUMilli
 	}
-	return score
+	if req.MinMemMiB == 0 {
+		req.MinMemMiB = protocol.DefaultTaskMinMemMiB
+	}
+	return model.Score(bid.AvailCPUMilli, bid.AvailMemMiB, bid.TotalCPUMilli, bid.TotalMemMiB, bid.ImageCached, req)
 }
 
+// Expectation defines function checking if [AuctionTrace] satisfies requirements.
 type Expectation func(t *testing.T, trace *AuctionTrace)
 
+// AuctionTestCase describes data necessary for testing [AuctionSession].
 type AuctionTestCase struct {
 	Name         string
 	Request      TaskCFP
@@ -51,6 +59,7 @@ type AuctionTestCase struct {
 	Expectations []Expectation
 }
 
+// TestHarness describes data necessary for performing test.
 type TestHarness struct {
 	DispatcherURL string
 	MQTTBroker    string
@@ -66,6 +75,7 @@ type TestHarness struct {
 	results map[string]chan TaskResult
 }
 
+// getEnv returns value of environmental variable specified by key. If lookup fails fallback is returned. 
 func getEnv(key, fallback string) string {
 	if val, ok := os.LookupEnv(key); ok && val != "" {
 		return val
@@ -73,6 +83,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// NewTestHarness creates new [TestHarness] to be used in test.
 func NewTestHarness(t *testing.T) *TestHarness {
 	t.Helper()
 
@@ -117,6 +128,7 @@ func NewTestHarness(t *testing.T) *TestHarness {
 	return h
 }
 
+// onBidReceived is callback executed when [protocol.BidPayload] was received.
 func (h *TestHarness) onBidReceived(_ mqtt.Client, msg mqtt.Message) {
 	var bid BidPayload
 	if err := json.Unmarshal(msg.Payload(), &bid); err != nil {
@@ -127,6 +139,7 @@ func (h *TestHarness) onBidReceived(_ mqtt.Client, msg mqtt.Message) {
 	h.mu.Unlock()
 }
 
+// onAckReceived is callback executed when [protocol.AckPayload] was received.
 func (h *TestHarness) onAckReceived(_ mqtt.Client, msg mqtt.Message) {
 	var ack AckPayload
 	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
@@ -137,6 +150,7 @@ func (h *TestHarness) onAckReceived(_ mqtt.Client, msg mqtt.Message) {
 	h.mu.Unlock()
 }
 
+// onResultReceived is callback executed when [protocol.TaskResult] was received.
 func (h *TestHarness) onResultReceived(_ mqtt.Client, msg mqtt.Message) {
 	var res TaskResult
 	if err := json.Unmarshal(msg.Payload(), &res); err != nil {
@@ -153,12 +167,14 @@ func (h *TestHarness) onResultReceived(_ mqtt.Client, msg mqtt.Message) {
 	}
 }
 
+// ensureTaskID provides dummy taskID if it is currently empty.
 func (h *TestHarness) ensureTaskID(req *TaskCFP) {
 	if req.TaskID == "" {
 		req.TaskID = fmt.Sprintf("test-%d", time.Now().UnixNano()/1e6)
 	}
 }
 
+// SubmitHTTP returns [AuctionTrace] for auction started with HTTP request.
 func (h *TestHarness) SubmitHTTP(ctx context.Context, req TaskCFP) (*AuctionTrace, error) {
 	h.ensureTaskID(&req)
 
@@ -213,6 +229,7 @@ func (h *TestHarness) SubmitHTTP(ctx context.Context, req TaskCFP) (*AuctionTrac
 	return trace, nil
 }
 
+// SubmitMQTT returns [AuctionTrace] for auction started by MQTT message.
 func (h *TestHarness) SubmitMQTT(ctx context.Context, req TaskCFP) (*AuctionTrace, error) {
 	if h.mqttClient == nil || !h.mqttClient.IsConnected() {
 		return nil, fmt.Errorf("MQTT client is not connected (%s)", h.MQTTBroker)
@@ -268,6 +285,7 @@ func (h *TestHarness) SubmitMQTT(ctx context.Context, req TaskCFP) (*AuctionTrac
 	}
 }
 
+// SubmitParallel submits sends multiple HTTP request for auction with staggerDelay between them and collects their [AuctionTrace] into array.
 func (h *TestHarness) SubmitParallel(ctx context.Context, requests []TaskCFP, staggerDelay time.Duration) ([]*AuctionTrace, []error) {
 	traces := make([]*AuctionTrace, len(requests))
 	errs := make([]error, len(requests))
@@ -288,6 +306,7 @@ func (h *TestHarness) SubmitParallel(ctx context.Context, requests []TaskCFP, st
 	return traces, errs
 }
 
+// RunCase runs tc by submitting request over HTTP
 func (h *TestHarness) RunCase(t *testing.T, tc AuctionTestCase) *AuctionTrace {
 	t.Helper()
 
@@ -328,6 +347,8 @@ func (h *TestHarness) RunCase(t *testing.T, tc AuctionTestCase) *AuctionTrace {
 	return trace
 }
 
+
+// ExpectAuctionSuccess defines requirements for successful auction requested over HTTP.
 func ExpectAuctionSuccess() Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
@@ -346,6 +367,7 @@ func ExpectAuctionSuccess() Expectation {
 	}
 }
 
+// ExpectAuctionRejected defines requirement for rejected auction requested over HTTP.
 func ExpectAuctionRejected() Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
@@ -356,6 +378,7 @@ func ExpectAuctionRejected() Expectation {
 	}
 }
 
+// ExpectPodStatus defines requirements for expected pod status.
 func ExpectPodStatus(expectedStatus string) Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
@@ -368,6 +391,7 @@ func ExpectPodStatus(expectedStatus string) Expectation {
 	}
 }
 
+// ExpectWinnerCluster defines requirements for expected winning cluster
 func ExpectWinnerCluster(expectedClusterID string) Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
@@ -380,6 +404,7 @@ func ExpectWinnerCluster(expectedClusterID string) Expectation {
 	}
 }
 
+// ExpectExcludedClusterNotChoses defines requirements for excluded cluster that is not supposed to be winning cluster.
 func ExpectExcludedClusterNotChosen(excludedClusterID string) Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
@@ -389,6 +414,7 @@ func ExpectExcludedClusterNotChosen(excludedClusterID string) Expectation {
 	}
 }
 
+// ExpectBidsMeetMinimumResources defines requirements for acceptable minimum resources of bid. 
 func ExpectBidsMeetMinimumResources() Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
@@ -405,11 +431,12 @@ func ExpectBidsMeetMinimumResources() Expectation {
 	}
 }
 
+// ExpectBidScoreMatchFormula defines requirements for score calculated with [ScoreFormula].
 func ExpectBidScoresMatchFormula(formula ScoreFormula) Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
 		for _, bid := range trace.Bids {
-			expected := formula(bid)
+			expected := formula(bid, trace.Request)
 			if bid.Score != expected {
 				t.Errorf("Invalid score for cluster %s: got %d, expected %d (AvailCPU=%dm, AvailMem=%dMiB, Cached=%v)",
 					bid.ClusterID, bid.Score, expected, bid.AvailCPUMilli, bid.AvailMemMiB, bid.ImageCached)
@@ -418,6 +445,7 @@ func ExpectBidScoresMatchFormula(formula ScoreFormula) Expectation {
 	}
 }
 
+// ExpectHighestBidderWins defines requirements for winning bid.
 func ExpectHighestBidderWins() Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
@@ -461,6 +489,7 @@ func ExpectHighestBidderWins() Expectation {
 	}
 }
 
+// ExpectClusterAccepted defines requirements for cluster that submitted ACK message to MQTT.
 func ExpectClusterAccepted(clusterID string) Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
@@ -477,6 +506,7 @@ func ExpectClusterAccepted(clusterID string) Expectation {
 	}
 }
 
+// ExpectClusterAccepted defines requirements for cluster that submitted RES message to MQTT.
 func ExpectClusterResigned(clusterID string) Expectation {
 	return func(t *testing.T, trace *AuctionTrace) {
 		t.Helper()
