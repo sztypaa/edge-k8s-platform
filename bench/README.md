@@ -9,6 +9,16 @@
 | `common.sh` | wspólne ustawienia skryptów |
 | `plot.py` | tabele i wykresy z plików CSV |
 
+## Po co te testy
+
+| Test | Co sprawdza | Wynik (2× Raspberry Pi) |
+| --- | --- | --- |
+| B1 | ile kosztuje pobranie obrazu, czyli dlaczego opłaca się wysyłać zadanie tam, gdzie obraz już jest | zimny start rośnie z rozmiarem obrazu (od 7,5 s do 106 s dla 525 MB), ciepły trwa ok. 5 s |
+| B2 | czy nowa funkcja celu (CPU + pamięć + obraz) wybiera klastry lepiej niż stara (wolne CPU + 500 za obraz) | nowa wykonała 80 z 90 zadań, stara 74, p95 czasu 27,5 s wobec 30,3 s |
+| B3 | czy przy przeciążeniu żaden klaster nie przyjmie więcej zadań, niż mieści, i która strategia szybciej przydziela lub odrzuca zadanie | maks. 1 zadanie naraz na klaster, `fallback` szybszy od `reauction` (ACK 1,2 s wobec 1,6 s, odrzucenie 1,9 s wobec 3,9 s) |
+
+Wykresy i tabele są w `results/`.
+
 Skrypty uruchamia się na VM. Obrazy testowe są na Docker Hubie (`sztypaa/rpi-task`, arm64):
 
 | Obraz | Rozmiar | Test |
