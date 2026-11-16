@@ -49,6 +49,18 @@ remove_images() {
       done
     "
   done
-  # kubelet reports the list of images on the node with a delay
-  sleep 15
+  # kubelet reports the list of images on the node with a delay of up to about a minute
+  sleep 45
+}
+
+# Pulls the given images on every Raspberry Pi, so the next task starts warm on any cluster.
+pull_images() {
+  for worker in "${WORKERS[@]}"; do
+    printf '%s\n' "${SSH_PASS}" | ssh -o StrictHostKeyChecking=accept-new "${worker}" "
+      IFS= read -r PW
+      for img in $*; do
+        printf '%s\n' \"\${PW}\" | sudo -S -p '' k3s crictl pull \"docker.io/\${img}\" >/dev/null
+      done
+    "
+  done
 }

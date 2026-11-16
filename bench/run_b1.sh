@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # B1: cold start (image pulled) vs warm start (image already on the node).
+# Before the warm run the image is pulled on every node, because the cluster that
+# reports the image in its bid can lag behind by up to a minute.
 #   TASK_CMD="..." SSH_PASS=... ./bench/run_b1.sh
 source "$(dirname "$0")/common.sh"
 setup_ssh
@@ -14,6 +16,7 @@ for i in $(seq 1 "${REPEAT}"); do
     echo "==> B1 run ${i}/${REPEAT}: ${image}"
     remove_images "${image}"
     loadgen -tasks 1 -images "${image}" -cmd "${TASK_CMD}" -cpu 500 -mem 128 -label cold -out "${OUT}"
+    pull_images "${image}"
     loadgen -tasks 1 -images "${image}" -cmd "${TASK_CMD}" -cpu 500 -mem 128 -label warm -out "${OUT}"
   done
 done
