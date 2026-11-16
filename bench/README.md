@@ -102,7 +102,7 @@ python bench/plot.py b3 b3.csv --outdir wyniki-b3
 | --- | --- | --- |
 | B1 | średni czas działania poda przy zimnym i ciepłym starcie dla każdego obrazu, różnica = czas pobrania | `b1_start.png` |
 | B2 | średni czas, mediana, p95, odrzucone zadania, % ciepłych startów | `b2_funkcja_celu.png` |
-| B3 | wykonane i odrzucone zadania, rezygnacje (RES), wysłania na zadanie, czas do ACK, najwięcej zadań naraz na jednym klastrze | `b3_strategie.png` |
+| B3 | wykonane i odrzucone zadania, rezygnacje (RES), wysłania na zadanie, czas do ACK, czas do odrzucenia zadania, najwięcej zadań naraz na jednym klastrze | `b3_strategie.png` |
 
 W B3 kolumna `max_tasks_on_one_cluster` musi wynosić 1. Większa wartość oznacza, że klaster przyjął więcej, niż mieści.
 

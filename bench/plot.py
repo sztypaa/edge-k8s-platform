@@ -41,14 +41,15 @@ def b1(df, outdir):
     ok = df[df["ok"]]
     table = ok.groupby(["tag", "label"])["pod_ms"].agg(["mean", "std", "count"]).unstack("label")
     table = table.reindex(sorted(table.index, key=image_size_mb))
-    table["pull_ms"] = table[("mean", "cold")] - table[("mean", "warm")]
-    table.columns = ["_".join(c).strip("_") for c in table.columns]
+    table.columns = ["_".join(c) for c in table.columns]
+    table["pull_ms"] = table["mean_cold"] - table["mean_warm"]
     table["failed"] = df[~df["ok"]].groupby("tag").size()
     show(table.fillna(0).round(0), outdir, "b1_tabela")
 
     wrong = df[df["ok"] & (df["label"] == "cold") & df["image_cached"]]
     if len(wrong):
-        print(f"UWAGA: {len(wrong)} zimnych startów zgłosiło obraz na węźle, sprawdź usuwanie obrazów")
+        print(f"Uwaga: przy {len(wrong)} zimnych startach oferta miała image_cached=true. Kubernetes aktualizuje "
+              "listę obrazów na węźle z opóźnieniem, czas poda i tak obejmuje pobranie obrazu.")
 
     fig, ax = plt.subplots(figsize=(7, 4))
     x = range(len(table))
@@ -116,6 +117,7 @@ def b3(df, outdir):
     table["dispatches_per_task"] = df.groupby("label")["dispatches"].mean()
     table["ack_ms_mean"] = ok.groupby("label")["ack_ms"].mean()
     table["ack_ms_max"] = ok.groupby("label")["ack_ms"].max()
+    table["rejected_ms_mean"] = df[~df["ok"]].groupby("label")["total_ms"].mean()
     table["max_tasks_on_one_cluster"] = [
         max([max_concurrent(g) for _, g in df[df["label"] == label].groupby("cluster")] or [0])
         for label in table.index
