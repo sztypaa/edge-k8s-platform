@@ -26,6 +26,8 @@ func (a *Agent) newMQTTClientOptions(broker string) *mqtt.ClientOptions {
 	opts.SetConnectRetry(true)
 	opts.SetConnectRetryInterval(protocol.MQTTRetryInterval)
 	opts.SetKeepAlive(protocol.MQTTKeepAlive)
+	// Handlers publish and wait for PUBACK, with ordered delivery this deadlocks when many messages arrive at once
+	opts.SetOrderMatters(false)
 	opts.SetOnConnectHandler(a.onConnect)
 	opts.SetConnectionLostHandler(a.onConnectionLost)
 
