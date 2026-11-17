@@ -89,12 +89,28 @@ func fetchNodeUsageMap(ctx context.Context, clientset *kubernetes.Clientset) (ma
 }
 
 func isImageCachedOnNode(node corev1.Node, targetImage string) bool {
+	target := normalizeImage(targetImage)
 	for _, img := range node.Status.Images {
 		for _, name := range img.Names {
-			if strings.Contains(name, targetImage) {
+			if normalizeImage(name) == target {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// normalizeImage returns the full image reference the node reports, e.g. nginx -> docker.io/library/nginx:latest
+func normalizeImage(image string) string {
+	if !strings.Contains(image, "@") && !strings.Contains(image[strings.LastIndex(image, "/")+1:], ":") {
+		image += ":latest"
+	}
+	registry, _, found := strings.Cut(image, "/")
+	switch {
+	case !found:
+		return "docker.io/library/" + image
+	case !strings.ContainsAny(registry, ".:") && registry != "localhost":
+		return "docker.io/" + image
+	}
+	return image
 }
