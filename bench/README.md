@@ -14,7 +14,7 @@
 | Test | Co sprawdza | Wynik (2× Raspberry Pi) |
 | --- | --- | --- |
 | B1 | ile kosztuje pobranie obrazu, czyli dlaczego opłaca się wysyłać zadanie tam, gdzie obraz już jest | zimny start rośnie z rozmiarem obrazu (od 7,5 s do 106 s dla 525 MB), ciepły trwa ok. 5 s |
-| B2 | czy nowa funkcja celu (CPU + pamięć + obraz) wybiera klastry lepiej niż stara (wolne CPU + 500 za obraz) | nowa wykonała 80 z 90 zadań, stara 74, p95 czasu 27,5 s wobec 30,3 s |
+| B2 | czy funkcja celu wysyła zadanie na węzeł, który ma już obraz | 86% wykonanych zadań trafiło na węzeł z obrazem (losowy wybór dałby ok. 50%), wykonane 80 z 90 zadań |
 | B3 | czy przy przeciążeniu żaden klaster nie przyjmie więcej zadań, niż mieści, i która strategia szybciej przydziela lub odrzuca zadanie | maks. 1 zadanie naraz na klaster, `fallback` szybszy od `reauction` (ACK 1,2 s wobec 1,6 s, odrzucenie 1,9 s wobec 3,9 s) |
 
 Wykresy i tabele robi `plot.py` (sekcja [Wykresy](#wykresy)), folder `results/` nie trafia do repo.
@@ -63,13 +63,13 @@ Limit wykonania zadania w systemie to 2 min (`DefaultExecutionTimeout`). Jeśli 
 
 ## B2 – funkcja celu
 
-Przed każdą serią skrypt usuwa obrazy `fn-*` z obu Raspberry, pobiera `fn-a` i `fn-b` na pierwsze, a `fn-c` i `fn-d` na drugie, i czeka minutę, aż Kubernetes zgłosi je w statusie węzłów. Potem wysyła tę samą serię zadań (30 zadań średnio co 5 s, popularniejsze obrazy częściej). Kolumna `image_cached` pokazuje, czy zadanie trafiło na klaster z obrazem. Domyślnie 3 serie.
-
 ```
-bash bench/run_b2.sh new
+bash bench/run_b2.sh
 ```
 
-Wynik starej funkcji celu (wolne CPU + 500 za obraz) w tabeli na górze został zmierzony raz, na kodzie sprzed jej zmiany (`fc60c06`).
+Przed każdą serią skrypt usuwa obrazy `fn-*` z obu Raspberry, pobiera `fn-a` i `fn-b` na pierwsze, a `fn-c` i `fn-d` na drugie, i czeka minutę, aż Kubernetes zgłosi je w statusie węzłów. Potem wysyła 30 zadań (średnio co 5 s, popularniejsze obrazy częściej). Domyślnie 3 serie.
+
+Każdy obraz jest tylko na jednym z dwóch węzłów, więc przy losowym wyborze węzła ok. 50% zadań trafiłoby na węzeł z obrazem. Wynik powyżej 50% oznacza, że funkcja celu bierze obraz pod uwagę. Gdy węzeł z obrazem jest zajęty, zadanie idzie na drugi i wtedy obraz musi się pobrać.
 
 ## B3 – wiele zadań naraz
 
@@ -98,7 +98,7 @@ python bench/plot.py b3 b3.csv --outdir bench/results/b3
 | Test | Tabela | Wykres |
 | --- | --- | --- |
 | B1 | średni czas działania poda przy zimnym i ciepłym starcie dla każdego obrazu, różnica = czas pobrania | `b1_chart.png` |
-| B2 | średni czas, mediana, p95, odrzucone zadania, % ciepłych startów | `b2_chart.png` |
+| B2 | dla każdej serii i łącznie: wykonane i odrzucone zadania, % zadań na węźle z obrazem, średni czas i p95 | `b2_chart.png` |
 | B3 | wykonane i odrzucone zadania, rezygnacje (RES), wysłania na zadanie, czas do ACK, czas do odrzucenia zadania, najwięcej zadań naraz na jednym klastrze | `b3_chart.png` |
 
 W B3 kolumna `max_tasks_on_one_cluster` musi wynosić 1. Większa wartość oznacza, że klaster przyjął więcej, niż mieści.
@@ -107,7 +107,7 @@ W B3 kolumna `max_tasks_on_one_cluster` musi wynosić 1. Większa wartość ozna
 
 | Kolumna | Znaczenie |
 | --- | --- |
-| `label` | etykieta serii (`cold`/`warm`, `new`/`old`, nazwa strategii) |
+| `label` | etykieta serii (`cold`/`warm`, `b2`, nazwa strategii) |
 | `total_ms` | czas od wysłania zlecenia do odpowiedzi dispatchera |
 | `ack_ms` | czas od wysłania zlecenia do ACK klastra, który wykonał zadanie |
 | `pod_ms` | czas działania poda według agenta, razem z pobraniem obrazu |

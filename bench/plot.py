@@ -9,7 +9,6 @@ import pandas as pd
 from matplotlib.ticker import MaxNLocator
 
 IMAGE_SIZES_MB = {"light": 0.08, "size-50": 52, "size-100": 105, "size-250": 262, "size-500": 525}
-B2_LABELS = {"new": "New objective\n(CPU + memory + cache)", "old": "Old objective\n(free CPU + 500 bonus)"}
 COMPLETED = "#2b7bba"
 REJECTED = "#e8833a"
 
@@ -53,11 +52,16 @@ def outcome_panel(ax, table, labels):
     x = list(range(len(table)))
     done = ax.bar(x, table["succeeded"], color=COMPLETED, label="Completed")
     rejected = ax.bar(x, table["rejected_or_failed"], bottom=table["succeeded"], color=REJECTED, label="Rejected")
+    small = table["tasks"].max() * 0.08
     for bars in (done, rejected):
         for bar in bars:
-            if bar.get_height():
-                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_y() + bar.get_height() / 2, f"{bar.get_height():.0f}",
+            height = bar.get_height()
+            if height >= small:
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_y() + height / 2, f"{height:.0f}",
                         ha="center", va="center", color="white", fontweight="bold")
+            elif height:
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_y() + height, f"{height:.0f}",
+                        ha="center", va="bottom", fontweight="bold")
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.set_ylabel("Number of tasks")
@@ -101,47 +105,36 @@ def b1(df, outdir):
 
 
 def b2(df, outdir):
+    df = df.assign(series=df["task_id"].str.rsplit("-", n=2).str[1])
     ok = df[df["ok"]]
-    table = ok.groupby("label")["total_ms"].agg(
-        mean="mean", median="median", p95=lambda s: s.quantile(0.95)
-    )
-    table["tasks"] = df.groupby("label").size()
-    table["succeeded"] = ok.groupby("label").size()
+    table = pd.DataFrame(index=sorted(df["series"].unique()))
+    table["tasks"] = df.groupby("series").size()
+    table["succeeded"] = ok.groupby("series").size()
     table["rejected_or_failed"] = table["tasks"] - table["succeeded"]
-    table["warm_starts_pct"] = ok.groupby("label")["image_cached"].mean() * 100
-    table["pod_ms_mean"] = ok.groupby("label")["pod_ms"].mean()
+    table["warm_starts_pct"] = ok.groupby("series")["image_cached"].mean() * 100
+    table["mean_ms"] = ok.groupby("series")["total_ms"].mean()
+    table["p95_ms"] = ok.groupby("series")["total_ms"].quantile(0.95)
+    table.index = [f"series {i + 1}" for i in range(len(table))]
+    table.loc["all"] = [len(df), len(ok), len(df) - len(ok), ok["image_cached"].mean() * 100,
+                        ok["total_ms"].mean(), ok["total_ms"].quantile(0.95)]
     show(table.fillna(0).round(0), outdir, "b2_table")
 
-    labels = [B2_LABELS.get(label, label) for label in table.index]
-    x = list(range(len(table)))
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14, 5))
-    outcome_panel(ax1, table, labels)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.8))
+    hits = ax1.bar([0, 1], [table.loc["all", "warm_starts_pct"], 50], color=[COMPLETED, "lightgray"])
+    label_bars(ax1, hits, "{:.0f}%")
+    ax1.set_xticks([0, 1])
+    ax1.set_xticklabels(["Objective function", "Random node\n(expected)"])
+    ax1.set_ylabel("Completed tasks run on a node with the image [%]")
+    ax1.set_ylim(0, 110)
+    ax1.set_title("Tasks sent to the node with the image")
 
-    mean = ax2.bar([i - 0.2 for i in x], table["mean"] / 1000, width=0.4, color=COMPLETED, label="Mean")
-    p95 = ax2.bar([i + 0.2 for i in x], table["p95"] / 1000, width=0.4, color=REJECTED, label="95th percentile")
-    label_bars(ax2, mean, "{:.1f}")
-    label_bars(ax2, p95, "{:.1f}")
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(labels)
-    ax2.set_ylabel("Time from submission to result [s]")
-    ax2.set_ylim(0, table["p95"].max() / 1000 * 1.3)
-    ax2.set_title("Latency of completed tasks")
-    ax2.legend(loc="upper center", ncol=2)
+    per_series = table.drop("all")
+    outcome_panel(ax2, per_series, [label.capitalize() for label in per_series.index])
 
-    warm = ax3.bar(x, table["warm_starts_pct"], color=COMPLETED)
-    label_bars(ax3, warm, "{:.0f}%")
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(labels)
-    ax3.set_ylabel("Completed tasks run on a node with the image [%]")
-    ax3.set_ylim(0, 110)
-    ax3.set_title("Warm starts (image cache hits)")
-
-    fig.suptitle("B2: Cluster selection – new vs. old objective function", fontsize=13)
-    series = df.groupby("label")["task_id"].apply(lambda s: s.str.rsplit("-", n=2).str[1].nunique()).max()
-    per_series = len(df) // len(table) // series
+    fig.suptitle("B2: Does the objective function send tasks to the node with the image?", fontsize=13)
     save(fig, outdir, "b2_chart",
-         f"{series} series × {per_series} tasks per variant, 4 images (Zipf popularity), "
-         "each image pre-pulled on one of the two nodes before every series.")
+         f"{len(per_series)} series × {int(per_series['tasks'].max())} tasks, 4 images (Zipf popularity), "
+         "two images pre-pulled on each node before every series.")
 
 
 def max_concurrent(rows):
