@@ -78,8 +78,8 @@ def b1(df, outdir):
 
     wrong = df[df["ok"] & (df["label"] == "cold") & df["image_cached"]]
     if len(wrong):
-        print(f"Note: {len(wrong)} cold starts had image_cached=true in the bid. Kubernetes updates the node image list "
-              "with a delay, the pod time still includes the image pull.")
+        print(f"Note: {len(wrong)} cold starts had image_cached=true in the bid. Before the fix of isImageCachedOnNode "
+              "an image with a longer name (e.g. size-500 for size-50) counted as cached, the pod time still includes the image pull.")
 
     fig, ax = plt.subplots(figsize=(8, 4.8))
     x = list(range(len(table)))
