@@ -17,7 +17,7 @@
 | B2 | czy nowa funkcja celu (CPU + pamięć + obraz) wybiera klastry lepiej niż stara (wolne CPU + 500 za obraz) | nowa wykonała 80 z 90 zadań, stara 74, p95 czasu 27,5 s wobec 30,3 s |
 | B3 | czy przy przeciążeniu żaden klaster nie przyjmie więcej zadań, niż mieści, i która strategia szybciej przydziela lub odrzuca zadanie | maks. 1 zadanie naraz na klaster, `fallback` szybszy od `reauction` (ACK 1,2 s wobec 1,6 s, odrzucenie 1,9 s wobec 3,9 s) |
 
-Wykresy i tabele są w `results/`.
+Wykresy i tabele robi `plot.py` (sekcja [Wykresy](#wykresy)), folder `results/` nie trafia do repo.
 
 Skrypty uruchamia się na VM. Obrazy testowe są na Docker Hubie (`sztypaa/rpi-task`, arm64):
 
@@ -96,7 +96,7 @@ Jeśli Raspberry mają inną liczbę rdzeni niż 4, zmień `CPU` (np. `CPU=1200 
 
 ## Wykresy
 
-Skopiuj wyniki z VM na swój komputer (gotowe wykresy z testów są w `bench/results/`):
+Skopiuj wyniki z VM na swój komputer:
 ```
 scp main-kubernetes@192.168.1.120:~/bench-results/*.csv .
 ```

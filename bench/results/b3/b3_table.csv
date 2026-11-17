@@ -1,3 +1,0 @@
-,tasks,succeeded,rejected_or_failed,resignations,dispatches_per_task,ack_ms_mean,ack_ms_max,rejected_ms_mean,max_tasks_on_one_cluster
-fallback,18,6,12,27,1.8,1178.7,1593,1851.0,1
-reauction,18,6,12,25,1.7,1562.8,2108,3855.7,1
