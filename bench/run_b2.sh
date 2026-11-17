@@ -7,7 +7,7 @@
 source "$(dirname "$0")/common.sh"
 setup_ssh
 
-LABEL="${1:?usage: run_b2.sh <label>, e.g. new or old}"
+LABEL="${1:?usage: run_b2.sh <label>, e.g. new}"
 TASKS="${TASKS:-30}"
 RATE="${RATE:-0.2}"
 REPEAT="${REPEAT:-3}"

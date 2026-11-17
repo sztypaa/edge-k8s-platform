@@ -65,24 +65,11 @@ Limit wykonania zadania w systemie to 2 min (`DefaultExecutionTimeout`). Jeśli 
 
 Przed każdą serią skrypt usuwa obrazy `fn-*` z obu Raspberry, pobiera `fn-a` i `fn-b` na pierwsze, a `fn-c` i `fn-d` na drugie, i czeka minutę, aż Kubernetes zgłosi je w statusie węzłów. Potem wysyła tę samą serię zadań (30 zadań średnio co 5 s, popularniejsze obrazy częściej). Kolumna `image_cached` pokazuje, czy zadanie trafiło na klaster z obrazem. Domyślnie 3 serie.
 
-Nowa funkcja celu (obecny kod):
 ```
 bash bench/run_b2.sh new
 ```
 
-Stara funkcja celu (wolne CPU + 500 za obraz). Na swoim komputerze przywróć jej pliki, wgraj kod i uruchom B2:
-```
-git restore --source fc60c06 -- internal/model/model.go internal/k8s/metrics.go internal/agent/agent.go dispatcher/dispatcher.go tests/harness_test.go
-.\deploy_and_test.ps1 <hasło>
-```
-na VM:
-```
-bash bench/run_b2.sh old
-```
-i z powrotem na swoim komputerze:
-```
-git restore --source HEAD -- internal/model/model.go internal/k8s/metrics.go internal/agent/agent.go dispatcher/dispatcher.go tests/harness_test.go
-```
+Wynik starej funkcji celu (wolne CPU + 500 za obraz) w tabeli na górze został zmierzony raz, na kodzie sprzed jej zmiany (`fc60c06`).
 
 ## B3 – wiele zadań naraz
 
