@@ -23,7 +23,10 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-var reauctionSuffix = regexp.MustCompile(`-r\d+$`)
+var (
+	reauctionSuffix = regexp.MustCompile(`-r\d+$`)
+	validLabel      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
+)
 
 type trace struct {
 	bids         []protocol.BidPayload
@@ -199,15 +202,22 @@ func connectMQTT(broker, user, pass string, obs *observer) (mqtt.Client, error) 
 	opts.SetUsername(user)
 	opts.SetPassword(pass)
 	opts.SetClientID(fmt.Sprintf("loadgen-%d", os.Getpid()))
-	opts.SetOnConnectHandler(func(c mqtt.Client) {
-		c.Subscribe(protocol.TopicBids, protocol.MQTTQoS, obs.onBid)
-		c.Subscribe(protocol.TopicAck, protocol.MQTTQoS, obs.onAck)
-		c.Subscribe(protocol.TopicExecute("+"), protocol.MQTTQoS, obs.onExecute)
-	})
 
 	client := mqtt.NewClient(opts)
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
 		return nil, token.Error()
+	}
+
+	subscriptions := map[string]mqtt.MessageHandler{
+		protocol.TopicBids:         obs.onBid,
+		protocol.TopicAck:          obs.onAck,
+		protocol.TopicExecute("+"): obs.onExecute,
+	}
+	for topic, handler := range subscriptions {
+		if token := client.Subscribe(topic, protocol.MQTTQoS, handler); token.Wait() && token.Error() != nil {
+			client.Disconnect(250)
+			return nil, fmt.Errorf("subscribe %s: %w", topic, token.Error())
+		}
 	}
 	return client, nil
 }
@@ -256,14 +266,15 @@ func main() {
 	if *images == "" || *command == "" {
 		log.Fatal("[FATAL] -images and -cmd are required")
 	}
+	if !validLabel.MatchString(*label) {
+		log.Fatalf("[FATAL] Invalid label %q: it is part of the pod name, use lowercase letters, digits and '-' (max 32 characters)", *label)
+	}
 
 	obs := &observer{traces: make(map[string]*trace)}
 	mqttClient, err := connectMQTT(*broker, *user, *pass, obs)
 	if err != nil {
 		log.Fatalf("[FATAL] MQTT connection failed: %v", err)
 	}
-	defer mqttClient.Disconnect(250)
-	time.Sleep(500 * time.Millisecond)
 
 	imageList := strings.Split(*images, ",")
 	weights := zipfWeights(len(imageList), *alpha)
@@ -301,6 +312,7 @@ func main() {
 	}
 	wg.Wait()
 	time.Sleep(500 * time.Millisecond)
+	mqttClient.Disconnect(250)
 
 	obs.mu.Lock()
 	for i := range records {
