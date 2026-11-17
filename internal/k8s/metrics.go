@@ -55,7 +55,7 @@ func GetClusterResources(ctx context.Context, clientset *kubernetes.Clientset, r
 		totalCPU += allocCPU
 		totalMem += allocMem / bytesPerMiB
 
-		if isImageCachedOnNode(node, targetImage) {
+		if IsImageCachedOnNode(node, targetImage) {
 			imageCached = true
 		}
 	}
@@ -88,7 +88,7 @@ func fetchNodeUsageMap(ctx context.Context, clientset *kubernetes.Clientset) (ma
 	return usageMap, nil
 }
 
-func isImageCachedOnNode(node corev1.Node, targetImage string) bool {
+func IsImageCachedOnNode(node corev1.Node, targetImage string) bool {
 	target := normalizeImage(targetImage)
 	for _, img := range node.Status.Images {
 		for _, name := range img.Names {

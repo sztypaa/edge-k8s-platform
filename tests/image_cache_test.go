@@ -1,8 +1,8 @@
-package k8s
+package tests
 
 import (
 	"testing"
-
+	"k8s-mqtt-agent/internal/k8s"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -28,7 +28,7 @@ func TestIsImageCachedOnNode(t *testing.T) {
 		{"ghcr.io/org/app:1", false},
 	}
 	for _, tt := range tests {
-		if got := isImageCachedOnNode(node, tt.image); got != tt.want {
+		if got := k8s.IsImageCachedOnNode(node, tt.image); got != tt.want {
 			t.Errorf("isImageCachedOnNode(%q) = %v, want %v", tt.image, got, tt.want)
 		}
 	}
