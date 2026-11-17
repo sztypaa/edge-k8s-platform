@@ -7,7 +7,6 @@
 | `run_b2.sh` | B2 – czy funkcja celu wysyła zadania tam, gdzie jest obraz |
 | `run_b3.sh` | B3 – wiele zadań naraz, `fallback` kontra `reauction` |
 | `common.sh` | wspólne ustawienia skryptów |
-| `plot.py` | tabele i wykresy z plików CSV |
 
 ## Po co te testy
 
@@ -16,8 +15,6 @@
 | B1 | ile kosztuje pobranie obrazu, czyli dlaczego opłaca się wysyłać zadanie tam, gdzie obraz już jest | zimny start rośnie z rozmiarem obrazu (od 7,5 s do 106 s dla 525 MB), ciepły trwa ok. 5 s |
 | B2 | czy funkcja celu wysyła zadanie na węzeł, który ma już obraz | 86% wykonanych zadań trafiło na węzeł z obrazem (losowy wybór dałby ok. 50%), wykonane 80 z 90 zadań |
 | B3 | czy przy przeciążeniu żaden klaster nie przyjmie więcej zadań, niż mieści, i która strategia szybciej przydziela lub odrzuca zadanie | maks. 1 zadanie naraz na klaster, `fallback` szybszy od `reauction` (ACK 1,2 s wobec 1,6 s, odrzucenie 1,9 s wobec 3,9 s) |
-
-Wykresy i tabele robi `plot.py` (sekcja [Wykresy](#wykresy)), folder `results/` nie trafia do repo.
 
 Skrypty uruchamia się na VM. Obrazy testowe są na Docker Hubie (`sztypaa/rpi-task`, arm64):
 
@@ -81,27 +78,14 @@ bash bench/run_b3.sh
 
 Jeśli Raspberry mają inną liczbę rdzeni niż 4, zmień `CPU` (np. `CPU=1200 bash bench/run_b3.sh` dla 2 rdzeni).
 
-## Wykresy
+## Wyniki
 
 Skopiuj wyniki z VM na swój komputer:
 ```
 scp main-kubernetes@192.168.1.120:~/bench-results/*.csv .
 ```
-i uruchom:
-```
-pip install pandas matplotlib tabulate
-python bench/plot.py b1 b1.csv --outdir bench/results/b1
-python bench/plot.py b2 b2.csv --outdir bench/results/b2
-python bench/plot.py b3 b3.csv --outdir bench/results/b3
-```
 
-| Test | Tabela | Wykres |
-| --- | --- | --- |
-| B1 | średni czas działania poda przy zimnym i ciepłym starcie dla każdego obrazu, różnica = czas pobrania | `b1_chart.png` |
-| B2 | dla każdej serii i łącznie: wykonane i odrzucone zadania, % zadań na węźle z obrazem, średni czas i p95 | `b2_chart.png` |
-| B3 | wykonane i odrzucone zadania, rezygnacje (RES), wysłania na zadanie, czas do ACK, czas do odrzucenia zadania, najwięcej zadań naraz na jednym klastrze | `b3_chart.png` |
-
-W B3 kolumna `max_tasks_on_one_cluster` musi wynosić 1. Większa wartość oznacza, że klaster przyjął więcej, niż mieści.
+W B3 na jednym klastrze nie może działać naraz więcej niż jedno zadanie (kolumny `cluster`, `ack_at`, `done_at`). Inaczej klaster przyjął więcej, niż mieści.
 
 ## Kolumny CSV
 
