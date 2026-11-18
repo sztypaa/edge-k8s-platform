@@ -1,10 +1,10 @@
-package strategy
+package tests
 
 import (
 	"context"
 	"testing"
 	"time"
-
+	"dispatcher/strategy"
 	"k8s-mqtt-agent/pkg/protocol"
 )
 
@@ -67,7 +67,7 @@ type mockAuctionManager struct {
 	sessionsQueue   []*mockAuctionSession
 }
 
-func (mgr *mockAuctionManager) NewAuction(ctx context.Context, task protocol.TaskCFP) (AuctionSession, func(), error) {
+func (mgr *mockAuctionManager) NewAuction(ctx context.Context, task protocol.TaskCFP) (strategy.AuctionSession, func(), error) {
 	var s *mockAuctionSession
 	if len(mgr.sessionsQueue) > 0 {
 		s = mgr.sessionsQueue[0]
@@ -109,7 +109,7 @@ func TestRankingFallbackStrategy_Resignation(t *testing.T) {
 		sessionsQueue: []*mockAuctionSession{sess},
 	}
 
-	strat := &RankingFallbackStrategy{
+	strat := &strategy.RankingFallbackStrategy{
 		BiddingDuration: 10 * time.Millisecond,
 		AckTimeout:      100 * time.Millisecond,
 		ExecTimeout:     100 * time.Millisecond,
@@ -167,7 +167,7 @@ func TestReauctionStrategy_CreatesNewAuction(t *testing.T) {
 		sessionsQueue: []*mockAuctionSession{sess1, sess2},
 	}
 
-	strat := &ReauctionStrategy{
+	strat := &strategy.ReauctionStrategy{
 		BiddingDuration: 10 * time.Millisecond,
 		AckTimeout:      100 * time.Millisecond,
 		ExecTimeout:     100 * time.Millisecond,
@@ -205,17 +205,17 @@ func TestReauctionStrategy_CreatesNewAuction(t *testing.T) {
 }
 
 func TestResolveStrategy(t *testing.T) {
-	s1 := ResolveStrategy("fallback")
+	s1 := strategy.ResolveStrategy("fallback")
 	if s1.Name() != protocol.StrategyRankingFallback {
 		t.Errorf("Expected fallback, got %s", s1.Name())
 	}
 
-	s2 := ResolveStrategy("reauction")
+	s2 := strategy.ResolveStrategy("reauction")
 	if s2.Name() != protocol.StrategyReauction {
 		t.Errorf("Expected reauction, got %s", s2.Name())
 	}
 
-	s3 := ResolveStrategy("unknown")
+	s3 := strategy.ResolveStrategy("unknown")
 	if s3.Name() != protocol.StrategyRankingFallback {
 		t.Errorf("Expected default to fallback, got %s", s3.Name())
 	}
