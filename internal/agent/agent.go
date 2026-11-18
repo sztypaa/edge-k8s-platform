@@ -1,3 +1,4 @@
+// Package agent defines agent that runs in each Kubernetes cluster
 package agent
 
 import (
@@ -16,15 +17,20 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// Agent is responsible for monitoring resource usage on cluster, executing function pods 
+// and communication with MQTT broker
 type Agent struct {
-	clusterID      string
-	namespace      string
-	metricsTimeout time.Duration
-	clientset      *kubernetes.Clientset
-	reservations   *model.ReservationTracker
-	execMu         sync.Mutex
+	clusterID      string						// ID of Kubernetes cluster
+	namespace      string						// Kubernetes namespace
+	metricsTimeout time.Duration				// specifies timeout for fetching resource metrics
+	clientset      *kubernetes.Clientset		// set of clients for Kubernetes group
+	reservations   *model.ReservationTracker	// used for keeping track of resource reservation by tasks accepted by Agent
+	execMu         sync.Mutex					// execution mutex
 }
 
+// New creates agent based on [Config] and [kubernetes.Clientset]. 
+// If cfg.MetricsTimeout is below 0 then [DefaultMetricsTimeout] is used.
+// If cfg.K8sNamespace is empty string then [DefaultK8sNamespace] is used.
 func New(cfg Config, clientset *kubernetes.Clientset) *Agent {
 	timeout := cfg.MetricsTimeout
 	if timeout <= 0 {
@@ -43,16 +49,20 @@ func New(cfg Config, clientset *kubernetes.Clientset) *Agent {
 	}
 }
 
+// Run starts [Agent] and connects it to MQTT broker.
 func (a *Agent) Run(broker string) {
 	mqttClient := mqtt.NewClient(a.newMQTTClientOptions(broker))
 	connectWithRetry(mqttClient)
 	select {}
 }
 
+// execTopic returns MQTT topic used to dispatch task to cluster specified by [Agent.clusterID]
 func (a *Agent) execTopic() string {
 	return protocol.TopicExecute(a.clusterID)
 }
 
+// handleCFP describes callback for [protocol.TopicCFP]. 
+// If cluster has sufficient resources [model.BidPayload] gets published to [protocol.TopicBids]
 func (a *Agent) handleCFP(client mqtt.Client, msg mqtt.Message) {
 	var cfp model.TaskCFP
 	if err := json.Unmarshal(msg.Payload(), &cfp); err != nil {
@@ -91,6 +101,9 @@ func (a *Agent) handleCFP(client mqtt.Client, msg mqtt.Message) {
 		cfp.TaskID, res.AvailCPUMilli, res.TotalCPUMilli, res.AvailMemMiB, res.TotalMemMiB, res.ImageCached, bid.Score)
 }
 
+// handleExecute defines callback for topic specified in [Agent.execTopic]
+// If [Agent.tryAcceptAndReserve] finishes with success [model.AckPayload] is published to [protocol.TopicAck]
+// and goroutine for [Agent.runTask] is started
 func (a *Agent) handleExecute(client mqtt.Client, msg mqtt.Message) {
 	var task model.TaskCFP
 	if err := json.Unmarshal(msg.Payload(), &task); err != nil {
@@ -121,6 +134,8 @@ func (a *Agent) handleExecute(client mqtt.Client, msg mqtt.Message) {
 	go a.runTask(client, task)
 }
 
+// tryAcceptAndReserve attempts to reserve task based on current resources in cluster.
+// Returns success flag and reason for failure
 func (a *Agent) tryAcceptAndReserve(task model.TaskCFP) (bool, string) {
 	a.execMu.Lock()
 	defer a.execMu.Unlock()
@@ -143,6 +158,7 @@ func (a *Agent) tryAcceptAndReserve(task model.TaskCFP) (bool, string) {
 	return true, ""
 }
 
+// runTask executes function pod and publishes [model.TaskResult] to [protocol.TopicResults]
 func (a *Agent) runTask(client mqtt.Client, task model.TaskCFP) {
 	defer a.reservations.Release(task.TaskID)
 

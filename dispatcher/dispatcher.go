@@ -28,6 +28,7 @@ const (
 
 var defaultTaskCommand = []string{"sh", "-c", "echo 'Running serverless task...'; sleep 2; echo 'Task done'"}
 
+// AuctionSession is responsible for managing messages related to auction for task specified by taskID.
 type AuctionSession struct {
 	taskID          string
 	originClusterID string
@@ -39,6 +40,7 @@ type AuctionSession struct {
 	resultChan chan protocol.TaskResult
 }
 
+// newAuctionSession creates new [AuctionSession]
 func newAuctionSession(taskID, originClusterID string, client mqtt.Client) *AuctionSession {
 	return &AuctionSession{
 		taskID:          taskID,
@@ -58,6 +60,8 @@ func (s *AuctionSession) OriginClusterID() string {
 	return s.originClusterID
 }
 
+// PublishCFP publishes given task to [protocol.TopicCFP].
+// This function is blocking.
 func (s *AuctionSession) PublishCFP(ctx context.Context, task protocol.TaskCFP) error {
 	data, err := json.Marshal(task)
 	if err != nil {
@@ -72,6 +76,7 @@ func (s *AuctionSession) PublishCFP(ctx context.Context, task protocol.TaskCFP) 
 	return token.Error()
 }
 
+// CollectBids collects all bids placed in current session during configured time window.
 func (s *AuctionSession) CollectBids(ctx context.Context, duration time.Duration) ([]protocol.BidPayload, error) {
 	select {
 	case <-ctx.Done():
@@ -86,6 +91,8 @@ func (s *AuctionSession) CollectBids(ctx context.Context, duration time.Duration
 	return bidsCopy, nil
 }
 
+// Dispatch clears ackChan and publishes task to [protocol.TopicExecute] for given clusterID
+// This function is blocking.
 func (s *AuctionSession) Dispatch(ctx context.Context, clusterID string, task protocol.TaskCFP) error {
 	for {
 		select {
@@ -107,6 +114,7 @@ drained:
 	return token.Error()
 }
 
+// AwaitAck awaits for [protocol.AckPayload] from cluster specified by ID.
 func (s *AuctionSession) AwaitAck(ctx context.Context, clusterID string, timeout time.Duration) (protocol.AckPayload, error) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -126,6 +134,8 @@ func (s *AuctionSession) AwaitAck(ctx context.Context, clusterID string, timeout
 	}
 }
 
+
+// AwaitResult awaits for [protocol.TaskResult] until timeout.
 func (s *AuctionSession) AwaitResult(ctx context.Context, timeout time.Duration) (*protocol.TaskResult, error) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -140,6 +150,7 @@ func (s *AuctionSession) AwaitResult(ctx context.Context, timeout time.Duration)
 	}
 }
 
+// AddBid adds bid to current session unless cluster is the origin of task.
 func (s *AuctionSession) AddBid(bid protocol.BidPayload) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,6 +163,7 @@ func (s *AuctionSession) AddBid(bid protocol.BidPayload) {
 		bid.TaskID, bid.ClusterID, bid.AvailCPUMilli, bid.AvailMemMiB, bid.ImageCached, bid.Score)
 }
 
+// NotifyAck sends ack to ackChan. If ackChan is full ack will be dropped.
 func (s *AuctionSession) NotifyAck(ack protocol.AckPayload) {
 	select {
 	case s.ackChan <- ack:
@@ -160,6 +172,7 @@ func (s *AuctionSession) NotifyAck(ack protocol.AckPayload) {
 	}
 }
 
+// NotifyResult sends res to resultChan. If resultChan is full res will be dropped.
 func (s *AuctionSession) NotifyResult(res protocol.TaskResult) {
 	select {
 	case s.resultChan <- res:
@@ -168,6 +181,7 @@ func (s *AuctionSession) NotifyResult(res protocol.TaskResult) {
 	}
 }
 
+// Dispatcher is responsible for managing [AuctionSession]s and choosing winner.
 type Dispatcher struct {
 	mqttClient mqtt.Client
 	strategy   strategy.AuctioneerStrategy
@@ -175,6 +189,7 @@ type Dispatcher struct {
 	sessions   map[string]*AuctionSession
 }
 
+// NewDispatcher creates new [Dispatcher]. If start is nil then [protocol.DefaultStrategy] is used.
 func NewDispatcher(client mqtt.Client, strat strategy.AuctioneerStrategy) *Dispatcher {
 	if strat == nil {
 		strat = strategy.ResolveStrategy(protocol.DefaultStrategy)
@@ -190,6 +205,7 @@ func (d *Dispatcher) Strategy() strategy.AuctioneerStrategy {
 	return d.strategy
 }
 
+// NewAuction creates new [AuctionSession]. Returns [AuctionSession], cleanup function, error.
 func (d *Dispatcher) NewAuction(ctx context.Context, task protocol.TaskCFP) (strategy.AuctionSession, func(), error) {
 	session := d.registerSession(task.TaskID, task.OriginClusterID)
 	cleanup := func() {
@@ -198,6 +214,7 @@ func (d *Dispatcher) NewAuction(ctx context.Context, task protocol.TaskCFP) (str
 	return session, cleanup, nil
 }
 
+// registerSession registers and returns new [AuctionSession] for specified task.
 func (d *Dispatcher) registerSession(taskID, originCluster string) *AuctionSession {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -206,12 +223,15 @@ func (d *Dispatcher) registerSession(taskID, originCluster string) *AuctionSessi
 	return session
 }
 
+// removeSession removes [AuctionSession] for specified task.
 func (d *Dispatcher) removeSession(taskID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.sessions, taskID)
 }
 
+// handleBid adds bid extracted from msg to [AuctionSession]. 
+// If [AuctionSession] for task related to bid doesn't exist then bid is dropped. 
 func (d *Dispatcher) handleBid(client mqtt.Client, msg mqtt.Message) {
 	var bid protocol.BidPayload
 	if err := json.Unmarshal(msg.Payload(), &bid); err != nil {
@@ -228,6 +248,8 @@ func (d *Dispatcher) handleBid(client mqtt.Client, msg mqtt.Message) {
 	}
 }
 
+// handleAck adds ack extracted from msg to [AuctionSession]. 
+// If [AuctionSession] for task related to ack doesn't exist then ack is dropped. 
 func (d *Dispatcher) handleAck(client mqtt.Client, msg mqtt.Message) {
 	var ack protocol.AckPayload
 	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
@@ -246,6 +268,8 @@ func (d *Dispatcher) handleAck(client mqtt.Client, msg mqtt.Message) {
 	}
 }
 
+// handleResult adds result extracted from msg to [AuctionSession]. 
+// If [AuctionSession] for task related to result doesn't exist then result is dropped. 
 func (d *Dispatcher) handleResult(client mqtt.Client, msg mqtt.Message) {
 	var res protocol.TaskResult
 	if err := json.Unmarshal(msg.Payload(), &res); err != nil {
@@ -264,6 +288,7 @@ func (d *Dispatcher) handleResult(client mqtt.Client, msg mqtt.Message) {
 	}
 }
 
+// handleMQTTRequest starts new goroutine for [Dispatcher.runAuction] for [protocol.TaskCFP] extracted from msg.
 func (d *Dispatcher) handleMQTTRequest(client mqtt.Client, msg mqtt.Message) {
 	var req protocol.TaskCFP
 	if err := json.Unmarshal(msg.Payload(), &req); err != nil {
@@ -276,6 +301,8 @@ func (d *Dispatcher) handleMQTTRequest(client mqtt.Client, msg mqtt.Message) {
 	}(req)
 }
 
+// runAction runs auction according to [strategy.Strategy] specified in [Dispatcher].
+// If any field of req is not specified then default value will be used for this field.
 func (d *Dispatcher) runAuction(ctx context.Context, req protocol.TaskCFP) (*protocol.TaskResult, error) {
 	if req.TaskID == "" {
 		req.TaskID = fmt.Sprintf("job-%d", time.Now().UnixNano()/1e6)
@@ -296,6 +323,8 @@ func (d *Dispatcher) runAuction(ctx context.Context, req protocol.TaskCFP) (*pro
 	return d.strategy.RunAuction(ctx, d, req)
 }
 
+// handleHTTPSubmit runs auction for [protocol.TaskCFP] extracted from r.
+// Only POST requests are accepted.
 func (d *Dispatcher) handleHTTPSubmit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -320,6 +349,7 @@ func (d *Dispatcher) handleHTTPSubmit(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
+// getEnv returns value of environmental variable specified by key. If lookup fails fallback is returned. 
 func getEnv(key, fallback string) string {
 	if val, ok := os.LookupEnv(key); ok {
 		return val

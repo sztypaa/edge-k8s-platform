@@ -1,3 +1,4 @@
+// package k8s defines API for communication with Kubernetes
 package k8s
 
 import (
@@ -8,6 +9,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// NewClient creates [kubernetes.Clientset] according with configuration loaded from kubeconfigPath
 func NewClient(kubeconfigPath string) (*kubernetes.Clientset, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {

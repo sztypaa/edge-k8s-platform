@@ -17,6 +17,7 @@ const (
 	bytesPerMiB = 1024 * 1024
 )
 
+// NodeMetricsList contains list of metadata and resource usage in node
 type NodeMetricsList struct {
 	Items []struct {
 		Metadata struct {
@@ -26,6 +27,7 @@ type NodeMetricsList struct {
 	} `json:"items"`
 }
 
+// GetClusterResources calculates available [model.ClusterResources] based on clientset, reservations and targetImage
 func GetClusterResources(ctx context.Context, clientset *kubernetes.Clientset, reservations *model.ReservationTracker, targetImage string) (model.ClusterResources, error) {
 	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -70,6 +72,7 @@ func GetClusterResources(ctx context.Context, clientset *kubernetes.Clientset, r
 	}, nil
 }
 
+// fetchNodeUsageMap fetches map of resource usages on node
 func fetchNodeUsageMap(ctx context.Context, clientset *kubernetes.Clientset) (map[string]corev1.ResourceList, error) {
 	rawMetrics, err := clientset.Discovery().RESTClient().Get().AbsPath(metricsPath).DoRaw(ctx)
 	if err != nil {
@@ -88,6 +91,7 @@ func fetchNodeUsageMap(ctx context.Context, clientset *kubernetes.Clientset) (ma
 	return usageMap, nil
 }
 
+// IsImageCachedOnNode checks whether specified image is already cached on node 
 func IsImageCachedOnNode(node corev1.Node, targetImage string) bool {
 	target := normalizeImage(targetImage)
 	for _, img := range node.Status.Images {
